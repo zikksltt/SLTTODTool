@@ -121,6 +121,12 @@
             const [activeDay, setActiveDay] = useState('Day1');
             const [viewMode, setViewMode] = useState('list'); 
 
+            // Keep reference to avoid stale closures in listeners
+            const activeVenueRef = useRef(activeVenue);
+            useEffect(() => {
+                activeVenueRef.current = activeVenue;
+            }, [activeVenue]);
+
             // Seat Switch & Image Capture State
             const [isSwapMode, setIsSwapMode] = useState(false);
             const [swapSourceIndex, setSwapSourceIndex] = useState(null);
@@ -233,7 +239,7 @@
                 return 'Zillion Builders, 7-Eleven Sabang, Lipa';
             };
 
-            // Firestore Live Listener
+            // Firestore Live Listener with Preserved Active Venue
             useEffect(() => {
                 if (!firestoreDb) {
                     setSyncStatus('error');
@@ -253,9 +259,15 @@
                                 const sorted = getSortedVenuesByHC(data.scheduleData);
                                 setSortedVenues(sorted);
                                 setStep('dashboard');
-                                if (!activeVenue || !sorted.includes(activeVenue)) {
-                                    setActiveVenue(sorted[0]);
-                                }
+
+                                // Functional update: preserves current active venue without resetting to sorted[0]
+                                setActiveVenue(curr => {
+                                    const preferred = curr || activeVenueRef.current;
+                                    if (preferred && sorted.includes(preferred)) {
+                                        return preferred;
+                                    }
+                                    return sorted[0] || null;
+                                });
                             }
                             if (data.customSeatings) setCustomSeatings(data.customSeatings);
                             if (data.attendanceData) setAttendanceData(data.attendanceData);
@@ -389,11 +401,10 @@
                 showToast("Generating HD seating image...");
 
                 try {
-                    // Small delay to allow react rendering state
                     await new Promise(res => setTimeout(res, 100));
 
                     const canvas = await html2canvas(seatingCanvasRef.current, {
-                        scale: 3, // 300+ DPI equivalent for crisp text
+                        scale: 3,
                         useCORS: true,
                         backgroundColor: '#ffffff',
                         logging: false
@@ -1296,7 +1307,6 @@
                                         <div className="flex items-center gap-2 flex-wrap">
                                             {viewMode === 'seating' && (
                                                 <>
-                                                    {/* HD Image Download Button */}
                                                     <button 
                                                         type="button" 
                                                         onClick={handleExportSeatingImage}
@@ -1306,7 +1316,6 @@
                                                         <IconCamera /> {isExportingImage ? 'Exporting...' : 'Export HD Image'}
                                                     </button>
 
-                                                    {/* Switch / Swap Seats Toggle Button */}
                                                     <button 
                                                         type="button" 
                                                         onClick={() => {
@@ -1385,7 +1394,7 @@
                                             })}
                                         </div>
                                     ) : (
-                                        /* Interactive Seating Canvas - Wider layout with HD Image Export Target */
+                                        /* Interactive Seating Canvas */
                                         <div className="w-full">
                                             {isSwapMode && (
                                                 <div className="w-full max-w-lg mx-auto mb-3 py-1.5 px-3 bg-amber-50 border border-amber-300 rounded text-center text-xs font-bold text-amber-900 fade-in flex items-center justify-center gap-1.5">
@@ -1394,9 +1403,7 @@
                                                 </div>
                                             )}
 
-                                            {/* Container targeted for HD Export */}
                                             <div ref={seatingCanvasRef} className="p-4 md:p-6 bg-slate-50 rounded-xl border border-slate-200 w-full max-w-[99%] mx-auto">
-                                                {/* Clean Title Banner for Exported Image */}
                                                 <div className="text-center mb-4">
                                                     <h2 className="text-sm md:text-base font-bold text-slate-800 tracking-tight">{activeVenue}</h2>
                                                     <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
@@ -1408,7 +1415,6 @@
                                                     FRONT / PRESENTATION SCREEN
                                                 </div>
 
-                                                {/* Wider Grid - stretches proportionally across screen without horizontal scrolling */}
                                                 <div 
                                                     className="grid gap-3 w-full"
                                                     style={{ gridTemplateColumns: `repeat(${currentCols}, minmax(0, 1fr))` }}
