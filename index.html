@@ -111,6 +111,9 @@
                 'Zillion Builders, 7-Eleven Sabang, Lipa': { Day1: '', Day2: '' }
             });
 
+            // Local Draft State for dates while modal is open
+            const [draftVenueDates, setDraftVenueDates] = useState({});
+
             const [addedParticipants, setAddedParticipants] = useState([]);
             const [customSeatings, setCustomSeatings] = useState({});
             const [attendanceData, setAttendanceData] = useState({}); 
@@ -121,18 +124,15 @@
             const [activeDay, setActiveDay] = useState('Day1');
             const [viewMode, setViewMode] = useState('list'); 
 
-            // Keep reference to avoid stale closures in listeners
             const activeVenueRef = useRef(activeVenue);
             useEffect(() => {
                 activeVenueRef.current = activeVenue;
             }, [activeVenue]);
 
-            // Seat Switch & Image Capture State
             const [isSwapMode, setIsSwapMode] = useState(false);
             const [swapSourceIndex, setSwapSourceIndex] = useState(null);
             const [isExportingImage, setIsExportingImage] = useState(false);
 
-            // Month & Year Shared Room ID
             const currentDate = new Date();
             const [selectedMonth, setSelectedMonth] = useState(MONTHS[currentDate.getMonth()]);
             const [selectedYear, setSelectedYear] = useState(String(currentDate.getFullYear()));
@@ -141,12 +141,10 @@
             const [syncStatus, setSyncStatus] = useState('connecting');
             const [showCloudModal, setShowCloudModal] = useState(false);
             const [showAddModal, setShowAddModal] = useState(false);
-            const [toastMessage, setToastMessage] = useState(null);
-
-            // Modals
             const [showDatesModal, setShowDatesModal] = useState(false);
             const [editingSeatPax, setEditingSeatPax] = useState(null);
             const [removingPax, setRemovingPax] = useState(null);
+            const [toastMessage, setToastMessage] = useState(null);
 
             const fileInputRef = useRef(null);
             const jsonInputRef = useRef(null);
@@ -239,7 +237,7 @@
                 return 'Zillion Builders, 7-Eleven Sabang, Lipa';
             };
 
-            // Firestore Live Listener with Preserved Active Venue
+            // Firestore Live Listener
             useEffect(() => {
                 if (!firestoreDb) {
                     setSyncStatus('error');
@@ -260,7 +258,6 @@
                                 setSortedVenues(sorted);
                                 setStep('dashboard');
 
-                                // Functional update: preserves current active venue without resetting to sorted[0]
                                 setActiveVenue(curr => {
                                     const preferred = curr || activeVenueRef.current;
                                     if (preferred && sorted.includes(preferred)) {
@@ -299,6 +296,7 @@
                     });
             }, [selectedMonth, selectedYear]);
 
+            // Debounced push state
             useEffect(() => {
                 if (step !== 'dashboard' || !scheduleData || isRemoteUpdate.current) return;
                 const timer = setTimeout(() => {
@@ -371,7 +369,7 @@
 
             const handleExportJson = () => {
                 const stateToSave = {
-                    version: "2.6",
+                    version: "2.7",
                     savedAt: new Date().toISOString(),
                     fileName,
                     mappings,
@@ -394,7 +392,6 @@
                 showToast("Workspace JSON downloaded!");
             };
 
-            // Download Seating as High-Definition Image (3x Scale)
             const handleExportSeatingImage = async () => {
                 if (!seatingCanvasRef.current) return;
                 setIsExportingImage(true);
@@ -459,9 +456,10 @@
                 reader.readAsBinaryString(file);
             };
 
-            // Process Schedule
-            const processSchedule = (isShuffle = false) => {
+            // Process Schedule with Support for Direct Date Overrides
+            const processSchedule = (isShuffle = false, overrideDates = null) => {
                 const { nameCol, supCol, jobCol, locCol, geoCol, regionCol, mallCol, targetGeo } = mappings;
+                const effectiveDates = overrideDates || venueDates;
                 
                 const result = {};
                 Object.keys(VENUE_CONFIG).forEach(v => {
@@ -530,8 +528,8 @@
 
                 Object.keys(twoDayPools).forEach(venue => {
                     const pool = twoDayPools[venue];
-                    const d1Date = venueDates[venue]?.Day1;
-                    const d2Date = venueDates[venue]?.Day2;
+                    const d1Date = effectiveDates[venue]?.Day1;
+                    const d2Date = effectiveDates[venue]?.Day2;
                     const d1IsFirstWed = isFirstWednesdayOfMonth(d1Date);
                     const d2IsFirstWed = isFirstWednesdayOfMonth(d2Date);
 
@@ -608,7 +606,7 @@
                     setActiveDay('Day1');
                     setStep('dashboard');
                 }
-                showToast(isShuffle ? "Teams shuffled successfully!" : "Schedule generated!");
+                showToast(isShuffle ? "Teams shuffled successfully!" : "Schedule updated!");
             };
 
             const handleAddPax = (newPax) => {
@@ -734,7 +732,7 @@
                 showToast(`Rescheduled ${pax.name} to ${targetDay}.`);
             };
 
-            // Seating Chart Grid & Vacant Seats Logic
+            // Seating Grid
             const currentSeatKey = `${activeVenue}_${activeDay}`;
             const activeSeatConfig = customSeatings[currentSeatKey] || { cols: 5, grid: null };
             const currentCols = activeSeatConfig.cols || 5;
@@ -829,7 +827,6 @@
                 showToast("Seating layout randomized (VIPs kept at front)!");
             };
 
-            // Switch / Swap Seat Handler
             const handleSeatCardClick = (p, idx) => {
                 if (isSwapMode) {
                     if (swapSourceIndex === null) {
@@ -873,291 +870,18 @@
                 }
             };
 
-            // Add Participant Modal
-            const AddPaxModal = () => {
-                const [name, setName] = useState('');
-                const [supervisor, setSupervisor] = useState('');
-                const [job, setJob] = useState('PROMOTER');
-                const [region, setRegion] = useState('CALABARZON');
-                const [mall, setMall] = useState('');
-                const [location, setLocation] = useState('');
-                const [targetVenue, setTargetVenue] = useState(activeVenue || 'Zillion Builders, 7-Eleven Sabang, Lipa');
-                const [targetDay, setTargetDay] = useState(activeDay || 'Day1');
-
-                if (!showAddModal) return null;
-
-                const handleSubmit = (e) => {
-                    e.preventDefault();
-                    if (!name.trim()) { showToast("Name is required!"); return; }
-                    handleAddPax({
-                        name: name.trim().toUpperCase(),
-                        supervisor: supervisor.trim().toUpperCase() || 'UNASSIGNED',
-                        job: job.trim().toUpperCase(),
-                        region: region.trim().toUpperCase(),
-                        mall: mall.trim().toUpperCase(),
-                        location: location.trim().toUpperCase(),
-                        venue: targetVenue,
-                        day: targetDay
-                    });
-                };
-
-                return (
-                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-                            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconUserPlus /> Add Participant</h3>
-                                <button type="button" onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
-                            </div>
-                            <form onSubmit={handleSubmit} className="p-5 space-y-3">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
-                                    <input type="text" required value={name} onChange={e=>setName(e.target.value)} placeholder="LASTNAME, FIRSTNAME M." className="w-full border rounded p-2 text-xs font-medium bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500" />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Supervisor</label>
-                                        <input type="text" value={supervisor} onChange={e=>setSupervisor(e.target.value)} placeholder="SUPERVISOR NAME" className="w-full border rounded p-2 text-xs font-medium bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Job Role</label>
-                                        <select value={job} onChange={e=>setJob(e.target.value)} className="w-full border rounded p-2 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                            <option value="PROMOTER">PROMOTER</option>
-                                            <option value="OPERATOR PROMOTER">OPERATOR PROMOTER</option>
-                                            <option value="MALL LEADER">MALL LEADER</option>
-                                            <option value="CLUSTER LEAD">CLUSTER LEAD</option>
-                                            <option value="MERCHANDISER">MERCHANDISER</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Region (Col J)</label>
-                                        <select value={region} onChange={e=>setRegion(e.target.value)} className="w-full border rounded p-2 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                            <option value="CALABARZON">CALABARZON</option>
-                                            <option value="BICOL">BICOL</option>
-                                            <option value="MINDORO">MINDORO</option>
-                                            <option value="BICOL ISLAND">BICOL ISLAND</option>
-                                            <option value="PALAWAN">PALAWAN</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Mall (Col O)</label>
-                                        <input type="text" value={mall} onChange={e=>setMall(e.target.value)} placeholder="e.g. SM CITY LIPA" className="w-full border rounded p-2 text-xs font-medium bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Target Venue</label>
-                                    <select value={targetVenue} onChange={e=>setTargetVenue(e.target.value)} className="w-full border rounded p-2 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                        {Object.keys(VENUE_CONFIG).map(v => <option key={v} value={v}>{v}</option>)}
-                                    </select>
-                                </div>
-                                {!VENUE_CONFIG[targetVenue]?.isOneDay && (
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Target Day</label>
-                                        <div className="flex gap-2">
-                                            {['Day1', 'Day2'].map(d => (
-                                                <button key={d} type="button" onClick={()=>setTargetDay(d)} className={`flex-1 py-1.5 text-xs font-bold rounded border ${targetDay === d ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600'}`}>{d}</button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                                <div className="pt-2 flex justify-end gap-2 border-t">
-                                    <button type="button" onClick={()=>setShowAddModal(false)} className="px-3 py-1.5 rounded text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
-                                    <button type="submit" className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 shadow-sm">Save Participant</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                );
+            // Safe Open Training Dates Modal
+            const handleOpenDatesModal = () => {
+                setDraftVenueDates(JSON.parse(JSON.stringify(venueDates)));
+                setShowDatesModal(true);
             };
 
-            // Month / Year Cloud Workspace Modal
-            const CloudSyncModal = () => {
-                if (!showCloudModal) return null;
-                const shareUrl = `${window.location.origin}${window.location.pathname}?month=${selectedMonth}&year=${selectedYear}`;
-
-                return (
-                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-                            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCloud /> Live Cloud Sync Workspace</h3>
-                                <button type="button" onClick={() => setShowCloudModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
-                            </div>
-                            <div className="p-5 space-y-4">
-                                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center">
-                                    <span className="text-xs font-semibold text-slate-600">Database Status:</span>
-                                    <div className="flex items-center gap-1.5">
-                                        <span className={`w-2.5 h-2.5 rounded-full ${syncStatus === 'connected' ? 'bg-emerald-500' : syncStatus === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                        <span className="text-xs font-bold capitalize">{syncStatus}</span>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Select Month</label>
-                                        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                            {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Select Year</label>
-                                        <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg text-xs text-blue-900 font-semibold text-center">
-                                    Current Workspace: <strong>{selectedMonth} {selectedYear}</strong>
-                                </div>
-
-                                <div className="pt-2">
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Shareable Team Link</label>
-                                    <div className="flex gap-2">
-                                        <input type="text" readOnly value={shareUrl} className="w-full border rounded-md px-2 py-1.5 text-xs text-slate-600 bg-slate-50" />
-                                        <button type="button" onClick={() => {
-                                            navigator.clipboard.writeText(shareUrl);
-                                            showToast("Shareable link copied to clipboard!");
-                                        }} className="px-3 py-1.5 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-md text-xs font-bold whitespace-nowrap">Copy</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            // Set Venue Dates Modal
-            const VenueDatesModal = () => {
-                if (!showDatesModal) return null;
-                return (
-                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
-                            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCalendar /> Set Training Dates</h3>
-                                <button type="button" onClick={() => setShowDatesModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
-                            </div>
-                            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar">
-                                <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-xs text-amber-800 flex items-start">
-                                    <IconAlert className="w-4 h-4 mr-1.5 mt-0.5" />
-                                    <span><strong>Rule:</strong> Operator Promoters cannot be scheduled on the <strong>first Wednesday</strong> of any month.</span>
-                                </div>
-                                {Object.keys(VENUE_CONFIG).map(v => (
-                                    <div key={v} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                                        <span className="text-xs font-bold text-slate-700 block mb-2">{v}</span>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="text-[10px] font-semibold text-slate-500">Day 1 Date</label>
-                                                <input type="date" value={venueDates[v]?.Day1 || ''} onChange={e => {
-                                                    const d = e.target.value;
-                                                    setVenueDates(prev => ({ ...prev, [v]: { ...prev[v], Day1: d } }));
-                                                }} className="w-full border rounded p-1.5 text-xs bg-white" />
-                                                {isFirstWednesdayOfMonth(venueDates[v]?.Day1) && (
-                                                    <span className="text-[9px] font-bold text-red-600 block mt-0.5">⚠️ 1st Wednesday of Month</span>
-                                                )}
-                                            </div>
-                                            {!VENUE_CONFIG[v].isOneDay && (
-                                                <div>
-                                                    <label className="text-[10px] font-semibold text-slate-500">Day 2 Date</label>
-                                                    <input type="date" value={venueDates[v]?.Day2 || ''} onChange={e => {
-                                                        const d = e.target.value;
-                                                        setVenueDates(prev => ({ ...prev, [v]: { ...prev[v], Day2: d } }));
-                                                    }} className="w-full border rounded p-1.5 text-xs bg-white" />
-                                                    {isFirstWednesdayOfMonth(venueDates[v]?.Day2) && (
-                                                        <span className="text-[9px] font-bold text-red-600 block mt-0.5">⚠️ 1st Wednesday of Month</span>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                                <div className="flex justify-end pt-2">
-                                    <button type="button" onClick={() => {
-                                        setShowDatesModal(false);
-                                        processSchedule(false);
-                                    }} className="px-5 py-2 bg-blue-600 text-white font-bold text-xs rounded-md shadow hover:bg-blue-700">Save & Apply Dates</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            // Attendance & Remarks Modal
-            const AttendanceModal = () => {
-                if (!editingSeatPax) return null;
-                const paxId = getPaxId(editingSeatPax);
-                const currentData = attendanceData[paxId] || { status: 'Present', violation: false, remarks: '' };
-                
-                const [status, setStatus] = useState(currentData.status);
-                const [violation, setViolation] = useState(currentData.violation);
-                const [remarks, setRemarks] = useState(currentData.remarks);
-
-                const handleSave = () => {
-                    setAttendanceData(prev => ({ ...prev, [paxId]: { status, violation, remarks } }));
-                    setEditingSeatPax(null);
-                    showToast(`Updated attendance for ${editingSeatPax.name}`);
-                };
-
-                return (
-                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
-                            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                <h3 className="font-bold text-slate-800 text-sm">Attendance & Remarks</h3>
-                                <button type="button" onClick={() => setEditingSeatPax(null)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
-                            </div>
-                            <div className="p-5 space-y-4">
-                                <div className="bg-slate-100 p-2.5 rounded text-center">
-                                    <span className="text-xs font-bold text-slate-800 block break-words">{editingSeatPax.name}</span>
-                                    <span className="text-[10px] text-slate-500 font-semibold block break-words mt-0.5">{editingSeatPax.job} • {editingSeatPax.supervisor}</span>
-                                    {editingSeatPax.mall && <span className="text-[10px] text-emerald-700 font-bold block mt-0.5">🏬 {editingSeatPax.mall}</span>}
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
-                                    <div className="flex gap-2">
-                                        {['Present', 'Late', 'Absent'].map(s => (
-                                            <button key={s} type="button" onClick={() => setStatus(s)}
-                                                className={`flex-1 py-1.5 text-xs font-bold rounded border ${status === s ? (s==='Present'?'bg-emerald-100 border-emerald-500 text-emerald-800' : s==='Late'?'bg-orange-100 border-orange-500 text-orange-800':'bg-red-100 border-red-500 text-red-800') : 'bg-white border-slate-300 text-slate-500 hover:bg-slate-50'}`}>
-                                                {s}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2 pt-1">
-                                    <input type="checkbox" id="violCheck" checked={violation} onChange={e=>setViolation(e.target.checked)} className="w-4 h-4 text-blue-600 rounded border-slate-300 cursor-pointer" />
-                                    <label htmlFor="violCheck" className="text-xs font-bold text-slate-700 cursor-pointer select-none">Mark One Look Infraction ⚠️</label>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Remarks</label>
-                                    <textarea value={remarks} onChange={e=>setRemarks(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none min-h-[60px]" placeholder="Add reason, grooming, or notes..."></textarea>
-                                </div>
-                                <div className="pt-2 border-t border-slate-100 flex gap-2">
-                                    <button type="button" onClick={() => setRemovingPax(editingSeatPax)} className="px-3 py-2 rounded text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200">Resigned</button>
-                                    <button type="button" onClick={handleSave} className="flex-1 px-4 py-2 rounded text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-sm">Save Changes</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            // Resigned Confirmation Modal
-            const RemoveConfirmModal = () => {
-                if (!removingPax) return null;
-                return (
-                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden p-5">
-                            <h3 className="font-bold text-slate-800 text-sm mb-2 text-red-600 flex items-center"><IconAlert className="w-4 h-4 mr-1.5" /> Confirm Resignation</h3>
-                            <p className="text-xs text-slate-600 mb-4">
-                                Are you sure you want to remove <strong>{removingPax.name}</strong> from the schedule? Their seating position will be kept as an empty vacant seat so layout remains intact.
-                            </p>
-                            <div className="flex justify-end gap-2">
-                                <button type="button" onClick={() => setRemovingPax(null)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded">Cancel</button>
-                                <button type="button" onClick={() => handleRemovePax(removingPax)} className="px-4 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded shadow-sm">Confirm Remove</button>
-                            </div>
-                        </div>
-                    </div>
-                );
+            // Save Dates Handler (Runs only on click of "Save & Apply")
+            const handleSaveDates = () => {
+                setVenueDates(draftVenueDates);
+                setShowDatesModal(false);
+                processSchedule(false, draftVenueDates);
+                showToast("Training dates saved and applied!");
             };
 
             return (
@@ -1183,7 +907,7 @@
                                         <button type="button" onClick={handleExportJson} className={headerBtnSecondary}>
                                             <IconSaveFile /> Save Workspace
                                         </button>
-                                        <button type="button" onClick={() => setShowDatesModal(true)} className={headerBtnBase}>
+                                        <button type="button" onClick={handleOpenDatesModal} className={headerBtnBase}>
                                             <IconCalendar /> Training Dates
                                         </button>
                                         <button type="button" onClick={() => processSchedule(true)} className={headerBtnBase}>
@@ -1487,11 +1211,298 @@
                         )}
                     </main>
 
-                    <AddPaxModal />
-                    <CloudSyncModal />
-                    <VenueDatesModal />
-                    <AttendanceModal />
-                    <RemoveConfirmModal />
+                    {/* Inline Training Dates Modal with Isolated Draft State */}
+                    {showDatesModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+                                <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCalendar /> Set Training Dates</h3>
+                                    <button type="button" onClick={() => setShowDatesModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                                </div>
+                                <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                                    <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-xs text-amber-800 flex items-start">
+                                        <IconAlert className="w-4 h-4 mr-1.5 mt-0.5" />
+                                        <span><strong>Rule:</strong> Operator Promoters cannot be scheduled on the <strong>first Wednesday</strong> of any month.</span>
+                                    </div>
+                                    {Object.keys(VENUE_CONFIG).map(v => (
+                                        <div key={v} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                            <span className="text-xs font-bold text-slate-700 block mb-2">{v}</span>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-semibold text-slate-500">Day 1 Date</label>
+                                                    <input 
+                                                        type="date" 
+                                                        value={draftVenueDates[v]?.Day1 || ''} 
+                                                        onChange={e => {
+                                                            const d = e.target.value;
+                                                            setDraftVenueDates(prev => ({
+                                                                ...prev,
+                                                                [v]: { ...(prev[v] || {}), Day1: d }
+                                                            }));
+                                                        }} 
+                                                        className="w-full border rounded p-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                                                    />
+                                                    {isFirstWednesdayOfMonth(draftVenueDates[v]?.Day1) && (
+                                                        <span className="text-[9px] font-bold text-red-600 block mt-0.5">⚠️ 1st Wednesday of Month</span>
+                                                    )}
+                                                </div>
+                                                {!VENUE_CONFIG[v].isOneDay && (
+                                                    <div>
+                                                        <label className="text-[10px] font-semibold text-slate-500">Day 2 Date</label>
+                                                        <input 
+                                                            type="date" 
+                                                            value={draftVenueDates[v]?.Day2 || ''} 
+                                                            onChange={e => {
+                                                                const d = e.target.value;
+                                                                setDraftVenueDates(prev => ({
+                                                                    ...prev,
+                                                                    [v]: { ...(prev[v] || {}), Day2: d }
+                                                                }));
+                                                            }} 
+                                                            className="w-full border rounded p-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                                                        />
+                                                        {isFirstWednesdayOfMonth(draftVenueDates[v]?.Day2) && (
+                                                            <span className="text-[9px] font-bold text-red-600 block mt-0.5">⚠️ 1st Wednesday of Month</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                                        <button type="button" onClick={() => setShowDatesModal(false)} className="px-4 py-2 bg-slate-100 text-slate-600 font-semibold text-xs rounded-md hover:bg-slate-200">Cancel</button>
+                                        <button type="button" onClick={handleSaveDates} className="px-5 py-2 bg-blue-600 text-white font-bold text-xs rounded-md shadow hover:bg-blue-700">Save & Apply Dates</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Inline Add Participant Modal */}
+                    {showAddModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+                                <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconUserPlus /> Add Participant</h3>
+                                    <button type="button" onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                                </div>
+                                <form onSubmit={e => {
+                                    e.preventDefault();
+                                    const form = e.target;
+                                    const nameVal = form.paxName.value.trim().toUpperCase();
+                                    if (!nameVal) return;
+                                    handleAddPax({
+                                        name: nameVal,
+                                        supervisor: form.paxSup.value.trim().toUpperCase() || 'UNASSIGNED',
+                                        job: form.paxJob.value.trim().toUpperCase(),
+                                        region: form.paxRegion.value.trim().toUpperCase(),
+                                        mall: form.paxMall.value.trim().toUpperCase(),
+                                        location: form.paxLoc.value.trim().toUpperCase(),
+                                        venue: form.paxVenue.value,
+                                        day: form.paxDay ? form.paxDay.value : 'Day1'
+                                    });
+                                }} className="p-5 space-y-3">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
+                                        <input name="paxName" type="text" required placeholder="LASTNAME, FIRSTNAME M." className="w-full border rounded p-2 text-xs font-medium bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1">Supervisor</label>
+                                            <input name="paxSup" type="text" placeholder="SUPERVISOR NAME" className="w-full border rounded p-2 text-xs font-medium bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1">Job Role</label>
+                                            <select name="paxJob" defaultValue="PROMOTER" className="w-full border rounded p-2 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                                <option value="PROMOTER">PROMOTER</option>
+                                                <option value="OPERATOR PROMOTER">OPERATOR PROMOTER</option>
+                                                <option value="MALL LEADER">MALL LEADER</option>
+                                                <option value="CLUSTER LEAD">CLUSTER LEAD</option>
+                                                <option value="MERCHANDISER">MERCHANDISER</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1">Region (Col J)</label>
+                                            <select name="paxRegion" defaultValue="CALABARZON" className="w-full border rounded p-2 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                                <option value="CALABARZON">CALABARZON</option>
+                                                <option value="BICOL">BICOL</option>
+                                                <option value="MINDORO">MINDORO</option>
+                                                <option value="BICOL ISLAND">BICOL ISLAND</option>
+                                                <option value="PALAWAN">PALAWAN</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1">Mall (Col O)</label>
+                                            <input name="paxMall" type="text" placeholder="e.g. SM CITY LIPA" className="w-full border rounded p-2 text-xs font-medium bg-slate-50 focus:bg-white outline-none focus:ring-2 focus:ring-blue-500" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Target Venue</label>
+                                        <select name="paxVenue" defaultValue={activeVenue || Object.keys(VENUE_CONFIG)[0]} className="w-full border rounded p-2 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                            {Object.keys(VENUE_CONFIG).map(v => <option key={v} value={v}>{v}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Target Day</label>
+                                        <select name="paxDay" defaultValue={activeDay || 'Day1'} className="w-full border rounded p-2 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                            <option value="Day1">Day 1</option>
+                                            <option value="Day2">Day 2</option>
+                                        </select>
+                                    </div>
+                                    <div className="pt-2 flex justify-end gap-2 border-t">
+                                        <button type="button" onClick={() => setShowAddModal(false)} className="px-3 py-1.5 rounded text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+                                        <button type="submit" className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 shadow-sm">Save Participant</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Inline Attendance Modal */}
+                    {editingSeatPax && (
+                        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+                                <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-800 text-sm">Attendance & Remarks</h3>
+                                    <button type="button" onClick={() => setEditingSeatPax(null)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                                </div>
+                                <div className="p-5 space-y-4">
+                                    <div className="bg-slate-100 p-2.5 rounded text-center">
+                                        <span className="text-xs font-bold text-slate-800 block break-words">{editingSeatPax.name}</span>
+                                        <span className="text-[10px] text-slate-500 font-semibold block break-words mt-0.5">{editingSeatPax.job} • {editingSeatPax.supervisor}</span>
+                                        {editingSeatPax.mall && <span className="text-[10px] text-emerald-700 font-bold block mt-0.5">🏬 {editingSeatPax.mall}</span>}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
+                                        <div className="flex gap-2">
+                                            {['Present', 'Late', 'Absent'].map(s => {
+                                                const paxId = getPaxId(editingSeatPax);
+                                                const cur = attendanceData[paxId]?.status || 'Present';
+                                                return (
+                                                    <button key={s} type="button" onClick={() => {
+                                                        setAttendanceData(prev => ({
+                                                            ...prev,
+                                                            [paxId]: { ...(prev[paxId] || { violation: false, remarks: '' }), status: s }
+                                                        }));
+                                                    }}
+                                                    className={`flex-1 py-1.5 text-xs font-bold rounded border ${cur === s ? (s==='Present'?'bg-emerald-100 border-emerald-500 text-emerald-800' : s==='Late'?'bg-orange-100 border-orange-500 text-orange-800':'bg-red-100 border-red-500 text-red-800') : 'bg-white border-slate-300 text-slate-500 hover:bg-slate-50'}`}>
+                                                        {s}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 pt-1">
+                                        <input 
+                                            type="checkbox" 
+                                            id="violCheck" 
+                                            checked={attendanceData[getPaxId(editingSeatPax)]?.violation || false} 
+                                            onChange={e => {
+                                                const paxId = getPaxId(editingSeatPax);
+                                                setAttendanceData(prev => ({
+                                                    ...prev,
+                                                    [paxId]: { ...(prev[paxId] || { status: 'Present', remarks: '' }), violation: e.target.checked }
+                                                }));
+                                            }} 
+                                            className="w-4 h-4 text-blue-600 rounded border-slate-300 cursor-pointer" 
+                                        />
+                                        <label htmlFor="violCheck" className="text-xs font-bold text-slate-700 cursor-pointer select-none">Mark One Look Infraction ⚠️</label>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Remarks</label>
+                                        <textarea 
+                                            value={attendanceData[getPaxId(editingSeatPax)]?.remarks || ''} 
+                                            onChange={e => {
+                                                const paxId = getPaxId(editingSeatPax);
+                                                setAttendanceData(prev => ({
+                                                    ...prev,
+                                                    [paxId]: { ...(prev[paxId] || { status: 'Present', violation: false }), remarks: e.target.value }
+                                                }));
+                                            }} 
+                                            className="w-full border border-slate-300 rounded p-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none min-h-[60px]" 
+                                            placeholder="Add reason, grooming, or notes..."
+                                        />
+                                    </div>
+                                    <div className="pt-2 border-t border-slate-100 flex gap-2">
+                                        <button type="button" onClick={() => setRemovingPax(editingSeatPax)} className="px-3 py-2 rounded text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200">Resigned</button>
+                                        <button type="button" onClick={() => {
+                                            setEditingSeatPax(null);
+                                            showToast(`Updated ${editingSeatPax.name}`);
+                                        }} className="flex-1 px-4 py-2 rounded text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-sm">Save & Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Inline Resigned Confirmation Modal */}
+                    {removingPax && (
+                        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden p-5">
+                                <h3 className="font-bold text-slate-800 text-sm mb-2 text-red-600 flex items-center"><IconAlert className="w-4 h-4 mr-1.5" /> Confirm Resignation</h3>
+                                <p className="text-xs text-slate-600 mb-4">
+                                    Are you sure you want to remove <strong>{removingPax.name}</strong> from the schedule? Their seating position will be kept as an empty vacant seat so layout remains intact.
+                                </p>
+                                <div className="flex justify-end gap-2">
+                                    <button type="button" onClick={() => setRemovingPax(null)} className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded">Cancel</button>
+                                    <button type="button" onClick={() => handleRemovePax(removingPax)} className="px-4 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded shadow-sm">Confirm Remove</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Inline Cloud Workspace Modal */}
+                    {showCloudModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+                                <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCloud /> Live Cloud Sync Workspace</h3>
+                                    <button type="button" onClick={() => setShowCloudModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                                </div>
+                                <div className="p-5 space-y-4">
+                                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center">
+                                        <span className="text-xs font-semibold text-slate-600">Database Status:</span>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className={`w-2.5 h-2.5 rounded-full ${syncStatus === 'connected' ? 'bg-emerald-500' : syncStatus === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                            <span className="text-xs font-bold capitalize">{syncStatus}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1">Select Month</label>
+                                            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                                {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1">Select Year</label>
+                                            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                                {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg text-xs text-blue-900 font-semibold text-center">
+                                        Current Workspace: <strong>{selectedMonth} {selectedYear}</strong>
+                                    </div>
+
+                                    <div className="pt-2">
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Shareable Team Link</label>
+                                        <div className="flex gap-2">
+                                            <input type="text" readOnly value={`${window.location.origin}${window.location.pathname}?month=${selectedMonth}&year=${selectedYear}`} className="w-full border rounded-md px-2 py-1.5 text-xs text-slate-600 bg-slate-50" />
+                                            <button type="button" onClick={() => {
+                                                navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?month=${selectedMonth}&year=${selectedYear}`);
+                                                showToast("Shareable link copied to clipboard!");
+                                            }} className="px-3 py-1.5 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-md text-xs font-bold whitespace-nowrap">Copy</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
