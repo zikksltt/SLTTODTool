@@ -40,15 +40,6 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
-        .is-manual-list { background-color: #fef08a !important; border-color: #eab308 !important; }
-        .is-manual-seat { background-color: #fef08a !important; border-color: #eab308 !important; }
-        
-        .seat-absent { background-color: #fee2e2 !important; border-color: #ef4444 !important; border-bottom-color: #dc2626 !important; }
-        .seat-absent * { color: #7f1d1d !important; }
-        
-        .seat-late { background-color: #ffedd5 !important; border-color: #f97316 !important; border-bottom-color: #ea580c !important; }
-        .seat-late * { color: #7c2d12 !important; }
     </style>
 </head>
 <body>
@@ -57,7 +48,12 @@
     <script type="text/babel">
         const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
-        // Firebase Configuration
+        const MONTHS = [
+            'January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'
+        ];
+        const YEARS = ['2024', '2025', '2026', '2027', '2028', '2029', '2030'];
+
         const firebaseConfig = {
             apiKey: "AIzaSyCAxKcfY-OmCBG_y59q7bOzh6XUz1FFiWI",
             authDomain: "sltt-od-tool.firebaseapp.com",
@@ -101,10 +97,7 @@
             
             const [mappings, setMappings] = useState({
                 nameCol: 6, supCol: 5, jobCol: 8, locCol: 11, geoCol: 4,
-                regionCol: 9, // Column J (0-indexed 9)
-                mallCol: 14,   // Column O (0-indexed 14)
-                targetGeo: 'SL', 
-                vipVenues: {}
+                regionCol: 9, mallCol: 14, targetGeo: 'SL', vipVenues: {}
             });
 
             const [venueDates, setVenueDates] = useState({
@@ -125,8 +118,12 @@
             const [activeDay, setActiveDay] = useState('Day1');
             const [viewMode, setViewMode] = useState('list'); 
 
-            // Cloud Sync State
-            const [roomId, setRoomId] = useState('main-schedule');
+            // Month & Year Shared Room ID
+            const currentDate = new Date();
+            const [selectedMonth, setSelectedMonth] = useState(MONTHS[currentDate.getMonth()]);
+            const [selectedYear, setSelectedYear] = useState(String(currentDate.getFullYear()));
+            const roomId = `${selectedMonth} ${selectedYear}`;
+
             const [syncStatus, setSyncStatus] = useState('connecting');
             const [showCloudModal, setShowCloudModal] = useState(false);
             const [toastMessage, setToastMessage] = useState(null);
@@ -174,12 +171,6 @@
                 return arr;
             };
 
-            const preserveScroll = (callback) => {
-                const scrollY = window.scrollY;
-                callback();
-                setTimeout(() => window.scrollTo(0, scrollY), 0);
-            };
-
             const getPaxId = (pax) => `${pax.name}|${pax.supervisor}`;
 
             const getJobPriority = (job) => {
@@ -188,6 +179,17 @@
                 if (j.includes('MALL LEADER')) return 2;
                 if (j.includes('MERCHANDISER')) return 3;
                 return 4;
+            };
+
+            // Order venues strictly by Total HC (Day1 + Day2) descending
+            const getSortedVenuesByHC = (sData) => {
+                if (!sData) return [];
+                return Object.keys(sData).sort((a, b) => {
+                    const totalA = (sData[a]?.Day1?.length || 0) + (sData[a]?.Day2?.length || 0);
+                    const totalB = (sData[b]?.Day1?.length || 0) + (sData[b]?.Day2?.length || 0);
+                    if (totalB !== totalA) return totalB - totalA;
+                    return a.localeCompare(b);
+                });
             };
 
             const determineVenue = (name, loc, sup, job, region, customConfig = mappings) => {
@@ -218,27 +220,27 @@
 
             // Firestore Live Listener
             useEffect(() => {
-                const params = new URLSearchParams(window.location.search);
-                const roomParam = params.get('room');
-                const targetRoom = roomParam || roomId;
-                if (roomParam) setRoomId(roomParam);
-
                 if (!firestoreDb) {
                     setSyncStatus('error');
                     return;
                 }
 
                 setSyncStatus('connecting');
-                const unsubscribe = firestoreDb.collection('workspaces').doc(targetRoom)
+                const docKey = `${selectedMonth}_${selectedYear}`.replace(/\s+/g, '_');
+                
+                const unsubscribe = firestoreDb.collection('workspaces').doc(docKey)
                     .onSnapshot((doc) => {
                         if (doc.exists) {
                             const data = doc.data();
                             isRemoteUpdate.current = true;
                             if (data.scheduleData) {
                                 setScheduleData(data.scheduleData);
-                                setSortedVenues(data.sortedVenues || Object.keys(data.scheduleData));
+                                const sorted = getSortedVenuesByHC(data.scheduleData);
+                                setSortedVenues(sorted);
                                 setStep('dashboard');
-                                if (!activeVenue) setActiveVenue((data.sortedVenues || Object.keys(data.scheduleData))[0]);
+                                if (!activeVenue || !sorted.includes(activeVenue)) {
+                                    setActiveVenue(sorted[0]);
+                                }
                             }
                             if (data.customSeatings) setCustomSeatings(data.customSeatings);
                             if (data.attendanceData) setAttendanceData(data.attendanceData);
@@ -256,19 +258,19 @@
                     });
 
                 return () => unsubscribe();
-            }, [roomId]);
+            }, [selectedMonth, selectedYear]);
 
-            // Sync to Firestore
             const pushStateToCloud = useCallback((payload) => {
                 if (!firestoreDb || isRemoteUpdate.current) return;
                 setSyncStatus('syncing');
-                firestoreDb.collection('workspaces').doc(roomId).set(payload, { merge: true })
+                const docKey = `${selectedMonth}_${selectedYear}`.replace(/\s+/g, '_');
+                firestoreDb.collection('workspaces').doc(docKey).set(payload, { merge: true })
                     .then(() => setSyncStatus('connected'))
                     .catch((err) => {
                         console.error("Firebase write error:", err);
                         setSyncStatus('error');
                     });
-            }, [roomId]);
+            }, [selectedMonth, selectedYear]);
 
             useEffect(() => {
                 if (step !== 'dashboard' || !scheduleData || isRemoteUpdate.current) return;
@@ -302,8 +304,8 @@
                             return;
                         }
 
+                        const venues = getSortedVenuesByHC(parsed.scheduleData);
                         setScheduleData(parsed.scheduleData);
-                        const venues = parsed.sortedVenues || Object.keys(parsed.scheduleData);
                         setSortedVenues(venues);
                         setActiveVenue(venues[0]);
                         setActiveDay('Day1');
@@ -318,7 +320,6 @@
                         setStep('dashboard');
                         showToast("Workspace restored successfully from JSON!");
 
-                        // Immediately push loaded JSON to Firestore
                         if (firestoreDb) {
                             pushStateToCloud({
                                 scheduleData: parsed.scheduleData,
@@ -341,10 +342,9 @@
                 e.target.value = '';
             };
 
-            // Save / Export Workspace JSON
             const handleExportJson = () => {
                 const stateToSave = {
-                    version: "2.0",
+                    version: "2.5",
                     savedAt: new Date().toISOString(),
                     fileName,
                     mappings,
@@ -359,7 +359,7 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `OD_Workspace_${new Date().toISOString().slice(0,10)}.json`;
+                a.download = `OD_Workspace_${selectedMonth}_${selectedYear}.json`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -367,7 +367,6 @@
                 showToast("Workspace JSON downloaded!");
             };
 
-            // Parse Excel
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -398,6 +397,7 @@
                 reader.readAsBinaryString(file);
             };
 
+            // Schedule Processing (With Automatic Fallback to avoid Blank Dashboard)
             const processSchedule = (isShuffle = false) => {
                 const { nameCol, supCol, jobCol, locCol, geoCol, regionCol, mallCol, targetGeo } = mappings;
                 
@@ -407,40 +407,54 @@
                 });
 
                 const seenNames = new Set();
-                const validParticipants = [];
+                let validParticipants = [];
                 
-                rawData.forEach(row => {
-                    let supervisorName = (row[supCol] || "").toString().trim().toUpperCase();
-                    supervisorName = supervisorName.replace("BARCIA, JAYAR", "BARCIA, JAY AR").replace("BARCIA, JAY-AR", "BARCIA, JAY AR");
-                    
-                    const name = (row[nameCol] || "").toString().trim();
-                    const job = (row[jobCol] || "").toString().trim().toUpperCase();
-                    const geo = (row[geoCol] || "").toString().trim().toUpperCase();
-                    const region = (row[regionCol] || "").toString().trim().toUpperCase();
-                    const mall = (row[mallCol] || "").toString().trim().toUpperCase();
-                    
-                    if (!name || seenNames.has(name)) return; 
-                    if (job.includes('MALL EXCELLENCE LEADER') || job.includes('REGIONAL EXCELLENCE LEADER')) return;
+                // Reconstruct from rawData if available
+                if (rawData && rawData.length > 0) {
+                    rawData.forEach(row => {
+                        let supervisorName = (row[supCol] || "").toString().trim().toUpperCase();
+                        supervisorName = supervisorName.replace("BARCIA, JAYAR", "BARCIA, JAY AR").replace("BARCIA, JAY-AR", "BARCIA, JAY AR");
+                        
+                        const name = (row[nameCol] || "").toString().trim();
+                        const job = (row[jobCol] || "").toString().trim().toUpperCase();
+                        const geo = (row[geoCol] || "").toString().trim().toUpperCase();
+                        const region = (row[regionCol] || "").toString().trim().toUpperCase();
+                        const mall = (row[mallCol] || "").toString().trim().toUpperCase();
+                        
+                        if (!name || seenNames.has(name)) return; 
+                        if (job.includes('MALL EXCELLENCE LEADER') || job.includes('REGIONAL EXCELLENCE LEADER')) return;
 
-                    const isPromoter = job.includes('PROMOTER') || job.includes('PROMO');
-                    const isSpecialJob = job.includes('CLUSTER LEAD') || job.includes('MALL LEADER') || job.includes('MERCHANDISER');
-                    if (!isPromoter && !isSpecialJob) return;
+                        const isPromoter = job.includes('PROMOTER') || job.includes('PROMO');
+                        const isSpecialJob = job.includes('CLUSTER LEAD') || job.includes('MALL LEADER') || job.includes('MERCHANDISER');
+                        if (!isPromoter && !isSpecialJob) return;
 
-                    if (targetGeo && geo !== targetGeo.toUpperCase()) return;
-                    
-                    seenNames.add(name);
-                    
-                    validParticipants.push({
-                        name: name,
-                        supervisor: supervisorName,
-                        job: job,
-                        location: (row[locCol] || "").toString().trim().toUpperCase(),
-                        geo: geo,
-                        region: region,
-                        mall: mall,
-                        isManual: false
+                        if (targetGeo && geo !== targetGeo.toUpperCase()) return;
+                        seenNames.add(name);
+                        
+                        validParticipants.push({
+                            name, supervisor: supervisorName, job,
+                            location: (row[locCol] || "").toString().trim().toUpperCase(),
+                            geo, region, mall, isManual: false
+                        });
                     });
-                });
+                } else if (scheduleData) {
+                    // Safe Recovery: Extract active participants directly from scheduleData so Shuffle never blanks!
+                    Object.keys(scheduleData).forEach(v => {
+                        ['Day1', 'Day2'].forEach(d => {
+                            (scheduleData[v][d] || []).forEach(p => {
+                                if (!seenNames.has(p.name)) {
+                                    seenNames.add(p.name);
+                                    validParticipants.push({ ...p });
+                                }
+                            });
+                        });
+                    });
+                }
+
+                if (validParticipants.length === 0) {
+                    showToast("No participants found to process.");
+                    return;
+                }
 
                 let twoDayPools = { 'Prime Days Hotel, Naga Camarines Sur': [], 'Zillion Builders, 7-Eleven Sabang, Lipa': [] };
 
@@ -528,22 +542,18 @@
                     });
                 });
 
-                const venueTotalsArray = Object.keys(result).map(v => ({
-                    name: v, total: result[v].Day1.length + result[v].Day2.length
-                })).sort((a, b) => b.total - a.total);
+                // Strict Headcount Sorting: Largest HC to Smallest
+                const sortedNames = getSortedVenuesByHC(result);
                 
-                const sortedNames = venueTotalsArray.map(item => item.name);
-                
-                preserveScroll(() => {
-                    setSortedVenues(sortedNames);
-                    setScheduleData(result);
-                    if (isShuffle) setCustomSeatings({});
-                    if (step !== 'dashboard') {
-                        setActiveVenue(sortedNames[0]);
-                        setActiveDay('Day1');
-                        setStep('dashboard');
-                    }
-                });
+                setSortedVenues(sortedNames);
+                setScheduleData(result);
+                if (isShuffle) setCustomSeatings({});
+                if (step !== 'dashboard') {
+                    setActiveVenue(sortedNames[0]);
+                    setActiveDay('Day1');
+                    setStep('dashboard');
+                }
+                showToast(isShuffle ? "Teams shuffled successfully!" : "Schedule generated!");
             };
 
             const handleRemovePax = (pax) => {
@@ -555,6 +565,8 @@
                             next[v][d] = next[v][d].filter(p => getPaxId(p) !== paxId);
                         });
                     });
+                    const updatedSorted = getSortedVenuesByHC(next);
+                    setSortedVenues(updatedSorted);
                     return next;
                 });
 
@@ -614,18 +626,62 @@
                 showToast(`Rescheduled ${pax.name} to ${targetDay}.`);
             };
 
-            // Cloud Workspace Modal
-            const CloudSyncModal = () => {
-                const [inputRoom, setInputRoom] = useState(roomId);
-                const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+            // Seating Chart Logic: Columns, Rows & Shuffle Seat layout
+            const currentSeatKey = `${activeVenue}_${activeDay}`;
+            const activeSeatConfig = customSeatings[currentSeatKey] || { cols: 5, grid: null };
+            const currentCols = activeSeatConfig.cols || 5;
 
+            // Compute seating list: front seats priority for VIP
+            const attendeesList = scheduleData?.[activeVenue]?.[activeDay] || [];
+            const seatingGrid = useMemo(() => {
+                if (activeSeatConfig.grid && activeSeatConfig.grid.length > 0) {
+                    return activeSeatConfig.grid;
+                }
+                return [...attendeesList].sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+            }, [activeSeatConfig.grid, attendeesList]);
+
+            const updateGridCols = (newCols) => {
+                const safeCols = Math.max(2, Math.min(10, newCols));
+                setCustomSeatings(prev => ({
+                    ...prev,
+                    [currentSeatKey]: {
+                        ...prev[currentSeatKey],
+                        cols: safeCols,
+                        grid: seatingGrid
+                    }
+                }));
+            };
+
+            const handleShuffleSeatPositions = () => {
+                // Shuffle seating cards while keeping VIPs in the front row
+                const vips = seatingGrid.filter(p => p && getJobPriority(p.job) <= 3);
+                const regulars = seatingGrid.filter(p => p && getJobPriority(p.job) > 3);
+                const nulls = seatingGrid.filter(p => p === null);
+
+                const shuffledRegulars = shuffleArray(regulars);
+                const newGrid = [...vips, ...shuffledRegulars, ...nulls];
+
+                setCustomSeatings(prev => ({
+                    ...prev,
+                    [currentSeatKey]: {
+                        ...prev[currentSeatKey],
+                        cols: currentCols,
+                        grid: newGrid
+                    }
+                }));
+                showToast("Seating layout randomized (VIPs kept at front)!");
+            };
+
+            // Month / Year Cloud Workspace Modal
+            const CloudSyncModal = () => {
                 if (!showCloudModal) return null;
+                const shareUrl = `${window.location.origin}${window.location.pathname}?month=${selectedMonth}&year=${selectedYear}`;
 
                 return (
                     <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
                         <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
                             <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCloud /> Live Cloud Sync</h3>
+                                <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCloud /> Live Cloud Sync Workspace</h3>
                                 <button type="button" onClick={() => setShowCloudModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
                             </div>
                             <div className="p-5 space-y-4">
@@ -637,21 +693,27 @@
                                     </div>
                                 </div>
 
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Shared Room ID</label>
-                                    <div className="flex gap-2">
-                                        <input type="text" value={inputRoom} onChange={e=>setInputRoom(e.target.value)} className="w-full border rounded-md px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500" placeholder="main-schedule" />
-                                        <button type="button" onClick={() => {
-                                            setRoomId(inputRoom.trim() || 'main-schedule');
-                                            setShowCloudModal(false);
-                                            showToast(`Switched to room: ${inputRoom}`);
-                                        }} className="px-4 py-1.5 bg-blue-600 text-white rounded-md text-xs font-bold hover:bg-blue-700">Switch</button>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Select Month</label>
+                                        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                            {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                        </select>
                                     </div>
-                                    <p className="text-[10px] text-slate-400 mt-1">Colleagues using this same Room ID will view and update your schedule live.</p>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Select Year</label>
+                                        <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg text-xs text-blue-900 font-semibold text-center">
+                                    Current Workspace: <strong>{selectedMonth} {selectedYear}</strong>
                                 </div>
 
                                 <div className="pt-2">
-                                    <label className="block text-xs font-bold text-slate-700 mb-1">Shareable Coordinator Link</label>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Shareable Team Link</label>
                                     <div className="flex gap-2">
                                         <input type="text" readOnly value={shareUrl} className="w-full border rounded-md px-2 py-1.5 text-xs text-slate-600 bg-slate-50" />
                                         <button type="button" onClick={() => {
@@ -806,9 +868,9 @@
                                 <h1 className="text-sm font-bold text-slate-800 tracking-tight flex items-center">
                                     Promoter Training Dashboard
                                 </h1>
-                                <button type="button" onClick={() => setShowCloudModal(true)} className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-full text-[11px] font-bold text-slate-700 transition">
+                                <button type="button" onClick={() => setShowCloudModal(true)} className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-full text-xs font-bold text-slate-700 transition">
                                     <span className={`w-2 h-2 rounded-full ${syncStatus === 'connected' ? 'bg-emerald-500' : syncStatus === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                    <span>Cloud: {roomId}</span>
+                                    <span>Cloud: {selectedMonth} {selectedYear}</span>
                                 </button>
                             </div>
                             
@@ -908,39 +970,54 @@
 
                         {step === 'dashboard' && scheduleData && (
                             <div className="space-y-4 fade-in">
-                                {/* Venue Navigation Tabs */}
+                                {/* Venue Navigation Tabs - Strictly Sorted Largest Headcount to Smallest */}
                                 <div className="bg-white p-1.5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-1.5">
                                     {sortedVenues.map(v => {
                                         const isActive = activeVenue === v;
-                                        const count = scheduleData[v].Day1.length + scheduleData[v].Day2.length;
+                                        const count = (scheduleData[v]?.Day1?.length || 0) + (scheduleData[v]?.Day2?.length || 0);
                                         return (
                                             <button key={v} type="button" onClick={() => setActiveVenue(v)}
                                                 className={`flex-1 p-2 rounded-lg text-left transition border ${isActive ? 'bg-blue-50 border-blue-200' : 'border-transparent hover:bg-slate-50'}`}>
-                                                <div className="flex justify-between items-center text-[10px] font-bold">
+                                                <div className="flex justify-between items-center text-[11px] font-bold">
                                                     <span className={isActive ? 'text-blue-900' : 'text-slate-600'}>{v}</span>
-                                                    <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{count}</span>
+                                                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{count}</span>
                                                 </div>
                                             </button>
                                         );
                                     })}
                                 </div>
 
-                                {/* Active Venue Header & Controls */}
+                                {/* Active Venue Header & Seating Controls */}
                                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                                     <div className="flex flex-wrap justify-between items-center border-b pb-3 mb-4 gap-2">
                                         <div className="flex items-center gap-2">
                                             <button type="button" onClick={() => setActiveDay('Day1')} className={`px-4 py-1.5 rounded text-xs font-bold ${activeDay === 'Day1' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                                                Day 1 ({scheduleData[activeVenue]?.Day1.length}) {venueDates[activeVenue]?.Day1 && `• ${venueDates[activeVenue]?.Day1}`}
+                                                Day 1 ({scheduleData[activeVenue]?.Day1?.length || 0}) {venueDates[activeVenue]?.Day1 && `• ${venueDates[activeVenue]?.Day1}`}
                                             </button>
                                             {!VENUE_CONFIG[activeVenue]?.isOneDay && (
                                                 <button type="button" onClick={() => setActiveDay('Day2')} className={`px-4 py-1.5 rounded text-xs font-bold ${activeDay === 'Day2' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                                                    Day 2 ({scheduleData[activeVenue]?.Day2.length}) {venueDates[activeVenue]?.Day2 && `• ${venueDates[activeVenue]?.Day2}`}
+                                                    Day 2 ({scheduleData[activeVenue]?.Day2?.length || 0}) {venueDates[activeVenue]?.Day2 && `• ${venueDates[activeVenue]?.Day2}`}
                                                 </button>
                                             )}
                                         </div>
 
-                                        <div className="flex gap-2">
-                                            <button type="button" onClick={() => setViewMode(viewMode === 'list' ? 'seating' : 'list')} className="px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded text-xs font-bold">
+                                        <div className="flex items-center gap-3">
+                                            {/* Columns and Rows custom controls when in Seating view */}
+                                            {viewMode === 'seating' && (
+                                                <div className="flex items-center gap-2 bg-slate-50 px-3 py-1 rounded-lg border border-slate-200">
+                                                    <span className="text-xs font-bold text-slate-600">Columns:</span>
+                                                    <button type="button" onClick={() => updateGridCols(currentCols - 1)} className="w-6 h-6 flex items-center justify-center bg-white border border-slate-300 rounded font-bold text-xs hover:bg-slate-100">-</button>
+                                                    <span className="text-xs font-bold text-blue-600 w-4 text-center">{currentCols}</span>
+                                                    <button type="button" onClick={() => updateGridCols(currentCols + 1)} className="w-6 h-6 flex items-center justify-center bg-white border border-slate-300 rounded font-bold text-xs hover:bg-slate-100">+</button>
+                                                    <span className="text-slate-300 mx-1">|</span>
+                                                    <span className="text-xs text-slate-500 font-semibold">Rows: {Math.ceil(seatingGrid.length / currentCols) || 1}</span>
+                                                    <button type="button" onClick={handleShuffleSeatPositions} className="ml-2 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-[11px] font-bold">
+                                                        Shuffle Seats
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            <button type="button" onClick={() => setViewMode(viewMode === 'list' ? 'seating' : 'list')} className="px-3.5 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded text-xs font-bold">
                                                 {viewMode === 'list' ? 'Switch to Seating View' : 'Switch to List View'}
                                             </button>
                                         </div>
@@ -966,7 +1043,7 @@
                                                             </div>
                                                             <span className="text-[10px] text-slate-500 block">{p.job} • {p.supervisor}</span>
                                                             {p.mall && <span className="text-[9px] font-semibold text-emerald-700 block mt-1">🏬 {p.mall}</span>}
-                                                            {att.violation && <span className="text-[9px] text-amber-700 font-bold block mt-0.5">⚠️ Violation</span>}
+                                                            {att.violation && <span className="text-[9px] text-amber-700 font-bold block mt-0.5">⚠️ Infraction</span>}
                                                             {att.remarks && <span className="text-[9px] text-slate-600 italic block mt-0.5">"{att.remarks}"</span>}
                                                         </div>
                                                         {!VENUE_CONFIG[activeVenue]?.isOneDay && (
@@ -981,16 +1058,54 @@
                                             })}
                                         </div>
                                     ) : (
-                                        <div className="p-4 bg-slate-50 rounded-xl text-center">
-                                            <p className="text-xs text-slate-500 mb-2 font-semibold">Custom Seating Chart</p>
-                                            <div className="grid grid-cols-5 gap-2 max-w-4xl mx-auto">
-                                                {scheduleData[activeVenue]?.[activeDay]?.map((p, idx) => (
-                                                    <div key={idx} onClick={() => setEditingSeatPax(p)} className="bg-white border border-slate-200 p-2 rounded shadow-sm text-center cursor-pointer hover:border-blue-400">
-                                                        <span className="text-[9px] text-slate-400 block">Seat {idx + 1}</span>
-                                                        <span className="text-[11px] font-bold text-slate-800 block truncate">{p.name}</span>
-                                                        <span className="text-[8px] text-slate-500 block truncate">{p.supervisor}</span>
-                                                    </div>
-                                                ))}
+                                        /* Interactive Seating Canvas with Column/Row configuration */
+                                        <div className="p-4 bg-slate-50 rounded-xl">
+                                            {/* Stage / Screen indicator */}
+                                            <div className="max-w-md mx-auto mb-6 py-1.5 bg-slate-200 border border-slate-300 rounded text-center text-[11px] font-bold text-slate-600 tracking-wider uppercase">
+                                                FRONT / PRESENTATION SCREEN
+                                            </div>
+
+                                            <div 
+                                                className="grid gap-2.5 max-w-5xl mx-auto"
+                                                style={{ gridTemplateColumns: `repeat(${currentCols}, minmax(0, 1fr))` }}
+                                            >
+                                                {seatingGrid.map((p, idx) => {
+                                                    if (!p) {
+                                                        return (
+                                                            <div key={idx} className="border-2 border-dashed border-slate-200 bg-white/40 rounded-lg p-3 text-center min-h-[75px] flex items-center justify-center">
+                                                                <span className="text-[10px] text-slate-300 font-semibold">Empty Seat {idx + 1}</span>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    const paxId = getPaxId(p);
+                                                    const att = attendanceData[paxId] || { status: 'Present' };
+                                                    const isVIP = getJobPriority(p.job) <= 3;
+                                                    const isOperator = p.job.includes('OPERATOR');
+
+                                                    return (
+                                                        <div 
+                                                            key={paxId + idx} 
+                                                            onClick={() => setEditingSeatPax(p)} 
+                                                            className={`border rounded-lg p-2.5 text-center cursor-pointer transition shadow-sm hover:shadow-md hover:border-blue-400 min-h-[75px] flex flex-col justify-between ${att.status === 'Absent' ? 'bg-red-50 border-red-300' : att.status === 'Late' ? 'bg-orange-50 border-orange-300' : isVIP ? 'bg-amber-50/70 border-amber-300' : 'bg-white border-slate-200'}`}
+                                                        >
+                                                            <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold mb-0.5">
+                                                                <span>Seat {idx + 1}</span>
+                                                                {isVIP && <span className="text-[8px] bg-amber-200 text-amber-800 px-1 py-0.2 rounded font-bold">FRONT VIP</span>}
+                                                                {isOperator && <span className="text-[8px] bg-purple-100 text-purple-700 px-1 py-0.2 rounded font-bold">OP.PROMO</span>}
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-[11px] font-bold text-slate-800 block truncate">{p.name}</span>
+                                                                <span className="text-[9px] text-slate-500 block truncate">{p.supervisor}</span>
+                                                            </div>
+                                                            <div className="mt-1 flex items-center justify-between text-[8px]">
+                                                                <span className="text-emerald-700 truncate font-semibold">{p.mall || ''}</span>
+                                                                {att.status !== 'Present' && (
+                                                                    <span className={`font-bold px-1 rounded ${att.status === 'Absent' ? 'bg-red-200 text-red-800' : 'bg-orange-200 text-orange-800'}`}>{att.status}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     )}
