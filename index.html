@@ -96,7 +96,6 @@
         const IconUnlock = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 mr-1 flex-shrink-0"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>;
 
         const App = () => {
-            // Password Protection State
             const [isAdmin, setIsAdmin] = useState(() => {
                 return sessionStorage.getItem('sltt_admin_authenticated') === 'true';
             });
@@ -116,14 +115,15 @@
                 regionCol: 9, mallCol: 14, targetGeo: 'SL', vipVenues: {}
             });
 
-            const [venueDates, setVenueDates] = useState({
+            const defaultVenueDates = {
                 'Online Office Day': { Day1: '' },
                 'Keisha Kitchenet': { Day1: '' },
                 "Njoy'S Tourist And Learners' Lounge": { Day1: '' },
                 'Prime Days Hotel, Naga Camarines Sur': { Day1: '', Day2: '' },
                 'Zillion Builders, 7-Eleven Sabang, Lipa': { Day1: '', Day2: '' }
-            });
+            };
 
+            const [venueDates, setVenueDates] = useState(defaultVenueDates);
             const [draftVenueDates, setDraftVenueDates] = useState({});
             const [addedParticipants, setAddedParticipants] = useState([]);
             const [customSeatings, setCustomSeatings] = useState({});
@@ -144,10 +144,18 @@
             const [swapSourceIndex, setSwapSourceIndex] = useState(null);
             const [isExportingImage, setIsExportingImage] = useState(false);
 
+            // Initialize Month and Year from URL query params if present, else fallback
             const currentDate = new Date();
-            const [selectedMonth, setSelectedMonth] = useState(MONTHS[currentDate.getMonth()]);
-            const [selectedYear, setSelectedYear] = useState(String(currentDate.getFullYear()));
-            const roomId = `${selectedMonth} ${selectedYear}`;
+            const urlParams = new URLSearchParams(window.location.search);
+            const initMonth = urlParams.get('month') && MONTHS.includes(urlParams.get('month')) ? urlParams.get('month') : MONTHS[currentDate.getMonth()];
+            const initYear = urlParams.get('year') && YEARS.includes(urlParams.get('year')) ? urlParams.get('year') : String(currentDate.getFullYear());
+
+            const [selectedMonth, setSelectedMonth] = useState(initMonth);
+            const [selectedYear, setSelectedYear] = useState(initYear);
+            
+            // Local selections inside Cloud Modal before switching
+            const [modalMonth, setModalMonth] = useState(initMonth);
+            const [modalYear, setModalYear] = useState(initYear);
 
             const [syncStatus, setSyncStatus] = useState('connecting');
             const [showCloudModal, setShowCloudModal] = useState(false);
@@ -248,7 +256,7 @@
                 return 'Zillion Builders, 7-Eleven Sabang, Lipa';
             };
 
-            // Firestore Live Listener
+            // Firestore Live Listener (Isolated by Month & Year Room)
             useEffect(() => {
                 if (!firestoreDb) {
                     setSyncStatus('error');
@@ -257,13 +265,14 @@
 
                 setSyncStatus('connecting');
                 const docKey = `${selectedMonth}_${selectedYear}`.replace(/\s+/g, '_');
-                
+                isRemoteUpdate.current = true;
+
                 const unsubscribe = firestoreDb.collection('workspaces').doc(docKey)
                     .onSnapshot((doc) => {
                         if (doc.exists) {
                             const data = doc.data();
                             isRemoteUpdate.current = true;
-                            if (data.scheduleData) {
+                            if (data.scheduleData && Object.keys(data.scheduleData).length > 0) {
                                 setScheduleData(data.scheduleData);
                                 const sorted = getSortedVenuesByHC(data.scheduleData);
                                 setSortedVenues(sorted);
@@ -276,27 +285,40 @@
                                     }
                                     return sorted[0] || null;
                                 });
+                            } else {
+                                setScheduleData(null);
+                                setStep('upload');
                             }
-                            if (data.customSeatings) setCustomSeatings(data.customSeatings);
-                            if (data.attendanceData) setAttendanceData(data.attendanceData);
-                            if (data.venueDates) setVenueDates(data.venueDates);
-                            if (data.addedParticipants) setAddedParticipants(data.addedParticipants);
+                            setCustomSeatings(data.customSeatings || {});
+                            setAttendanceData(data.attendanceData || {});
+                            setVenueDates(data.venueDates || defaultVenueDates);
+                            setAddedParticipants(data.addedParticipants || []);
                             if (data.mappings) setMappings(data.mappings);
                             if (data.fileName) setFileName(data.fileName);
-                            
-                            setTimeout(() => { isRemoteUpdate.current = false; }, 300);
+                        } else {
+                            // Empty month partition: clear in-memory schedule to prevent cross-contamination
+                            setScheduleData(null);
+                            setSortedVenues([]);
+                            setActiveVenue(null);
+                            setCustomSeatings({});
+                            setAttendanceData({});
+                            setAddedParticipants([]);
+                            setVenueDates(defaultVenueDates);
+                            setStep('upload');
                         }
                         setSyncStatus('connected');
+                        setTimeout(() => { isRemoteUpdate.current = false; }, 400);
                     }, (err) => {
                         console.error("Firestore listener error:", err);
                         setSyncStatus('error');
+                        isRemoteUpdate.current = false;
                     });
 
                 return () => unsubscribe();
             }, [selectedMonth, selectedYear]);
 
             const pushStateToCloud = useCallback((payload) => {
-                if (!firestoreDb || isRemoteUpdate.current) return;
+                if (!firestoreDb || isRemoteUpdate.current || !isAdmin) return;
                 setSyncStatus('syncing');
                 const docKey = `${selectedMonth}_${selectedYear}`.replace(/\s+/g, '_');
                 firestoreDb.collection('workspaces').doc(docKey).set(payload, { merge: true })
@@ -305,10 +327,10 @@
                         console.error("Firebase write error:", err);
                         setSyncStatus('error');
                     });
-            }, [selectedMonth, selectedYear]);
+            }, [selectedMonth, selectedYear, isAdmin]);
 
             useEffect(() => {
-                if (step !== 'dashboard' || !scheduleData || isRemoteUpdate.current) return;
+                if (step !== 'dashboard' || !scheduleData || isRemoteUpdate.current || !isAdmin) return;
                 const timer = setTimeout(() => {
                     pushStateToCloud({
                         scheduleData,
@@ -319,11 +341,13 @@
                         addedParticipants,
                         mappings,
                         fileName,
+                        month: selectedMonth,
+                        year: selectedYear,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                 }, 800);
                 return () => clearTimeout(timer);
-            }, [scheduleData, customSeatings, attendanceData, venueDates, addedParticipants]);
+            }, [scheduleData, customSeatings, attendanceData, venueDates, addedParticipants, selectedMonth, selectedYear, isAdmin]);
 
             // Authentication Handler
             const handleUnlockSubmit = (e) => {
@@ -346,6 +370,23 @@
                 setIsSwapMode(false);
                 setSwapSourceIndex(null);
                 showToast("🔒 Dashboard locked in View-Only mode.");
+            };
+
+            // Switch to a new Month/Year Partition cleanly
+            const handleSwitchWorkspace = () => {
+                if (modalMonth === selectedMonth && modalYear === selectedYear) {
+                    setShowCloudModal(false);
+                    return;
+                }
+                setSelectedMonth(modalMonth);
+                setSelectedYear(modalYear);
+                setShowCloudModal(false);
+
+                // Update URL query parameters cleanly without full reload
+                const newUrl = `${window.location.pathname}?month=${modalMonth}&year=${modalYear}`;
+                window.history.pushState({ path: newUrl }, '', newUrl);
+
+                showToast(`Switched workspace to ${modalMonth} ${modalYear}`);
             };
 
             // Load Workspace JSON File
@@ -376,9 +417,9 @@
                         if (parsed.fileName) setFileName(parsed.fileName);
                         
                         setStep('dashboard');
-                        showToast("Workspace restored successfully from JSON!");
+                        showToast(`Workspace restored successfully for ${selectedMonth} ${selectedYear}!`);
 
-                        if (firestoreDb) {
+                        if (firestoreDb && isAdmin) {
                             pushStateToCloud({
                                 scheduleData: parsed.scheduleData,
                                 sortedVenues: venues,
@@ -388,6 +429,8 @@
                                 addedParticipants: parsed.addedParticipants || [],
                                 mappings: parsed.mappings || mappings,
                                 fileName: parsed.fileName || file.name,
+                                month: selectedMonth,
+                                year: selectedYear,
                                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
                         }
@@ -402,8 +445,10 @@
 
             const handleExportJson = () => {
                 const stateToSave = {
-                    version: "2.8",
+                    version: "2.9",
                     savedAt: new Date().toISOString(),
+                    month: selectedMonth,
+                    year: selectedYear,
                     fileName,
                     mappings,
                     venueDates,
@@ -445,6 +490,7 @@
                             grid.forEach((p, idx) => {
                                 if (!p) {
                                     masterRows.push({
+                                        "Month": `${selectedMonth} ${selectedYear}`,
                                         "Venue": venue,
                                         "Training Day": day === 'Day1' ? 'Day 1' : 'Day 2',
                                         "Date": dateStr,
@@ -463,6 +509,7 @@
                                 const paxId = getPaxId(p);
                                 const att = attendanceData[paxId] || { status: 'Present', violation: false, remarks: '' };
                                 masterRows.push({
+                                    "Month": `${selectedMonth} ${selectedYear}`,
                                     "Venue": venue,
                                     "Training Day": day === 'Day1' ? 'Day 1' : 'Day 2',
                                     "Date": dateStr,
@@ -553,7 +600,7 @@
                     });
 
                     const cleanVenue = (activeVenue || 'Venue').replace(/[^a-zA-Z0-9]/g, '_');
-                    const imgFileName = `${cleanVenue}_${activeDay}_Seating_Chart.png`;
+                    const imgFileName = `${cleanVenue}_${activeDay}_${selectedMonth}_${selectedYear}_Seating_Chart.png`;
 
                     const link = document.createElement('a');
                     link.download = imgFileName;
@@ -1047,14 +1094,17 @@
                                 <h1 className="text-sm font-bold text-slate-800 tracking-tight flex items-center">
                                     Promoter Training Dashboard
                                 </h1>
-                                <button type="button" onClick={() => setShowCloudModal(true)} className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-full text-xs font-bold text-slate-700 transition">
+                                <button type="button" onClick={() => {
+                                    setModalMonth(selectedMonth);
+                                    setModalYear(selectedYear);
+                                    setShowCloudModal(true);
+                                }} className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-full text-xs font-bold text-slate-700 transition">
                                     <span className={`w-2 h-2 rounded-full ${syncStatus === 'connected' ? 'bg-emerald-500' : syncStatus === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'}`}></span>
                                     <span>Cloud: {selectedMonth} {selectedYear}</span>
                                 </button>
                             </div>
                             
                             <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar">
-                                {/* Password Unlock / Lock Controls */}
                                 {isAdmin ? (
                                     <button 
                                         type="button" 
@@ -1081,7 +1131,6 @@
                                             <IconTable /> Export Excel
                                         </button>
 
-                                        {/* Editing tools: Visible only when Unlocked */}
                                         {isAdmin && (
                                             <>
                                                 <button type="button" onClick={() => setShowAddModal(true)} className={headerBtnBase}>
@@ -1129,9 +1178,14 @@
                         {step === 'upload' && (
                             <div className="max-w-md mx-auto mt-16 fade-in text-center bg-white p-8 rounded-xl shadow-sm border border-slate-200 space-y-4">
                                 <div>
-                                    <h2 className="text-base font-bold text-slate-800 mb-1">Load Training Schedule</h2>
+                                    <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 mb-2">
+                                        Workspace: {selectedMonth} {selectedYear}
+                                    </span>
+                                    <h2 className="text-base font-bold text-slate-800 mb-1">Training Schedule Empty</h2>
                                     <p className="text-slate-500 text-xs">
-                                        {isAdmin ? "Choose how you would like to load your workspace" : "Please unlock editor mode to load a schedule file, or wait for live cloud sync."}
+                                        {isAdmin 
+                                            ? `No schedule saved for ${selectedMonth} ${selectedYear} yet. Upload an Excel workbook or load a JSON workspace for this month.` 
+                                            : `No schedule is currently active for ${selectedMonth} ${selectedYear}. Please unlock editing to upload.`}
                                     </p>
                                 </div>
 
@@ -1141,7 +1195,7 @@
                                             <span className="text-emerald-700 font-bold text-sm flex items-center mb-1">
                                                 <IconFolderOpen /> Load Saved Workspace (.json)
                                             </span>
-                                            <span className="text-[11px] text-emerald-600">Restores previous schedule, attendance, and seating</span>
+                                            <span className="text-[11px] text-emerald-600">Restores saved schedule for {selectedMonth}</span>
                                         </button>
 
                                         <div className="flex items-center gap-2">
@@ -1152,9 +1206,9 @@
 
                                         <button type="button" onClick={() => fileInputRef.current.click()} className="w-full border-2 border-dashed border-blue-300 hover:border-blue-500 rounded-lg p-5 bg-blue-50/50 transition cursor-pointer flex flex-col items-center justify-center">
                                             <span className="text-blue-600 font-bold text-xs flex items-center mb-1">
-                                                <IconUpload /> Upload New Excel (.xlsx)
+                                                <IconUpload /> Upload Excel Workbook (.xlsx)
                                             </span>
-                                            <span className="text-[11px] text-blue-500">Imports fresh raw schedule workbook</span>
+                                            <span className="text-[11px] text-blue-500">Imports fresh raw schedule for {selectedMonth}</span>
                                         </button>
                                     </>
                                 ) : (
@@ -1171,7 +1225,7 @@
 
                         {step === 'mapping' && (
                             <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 p-5 fade-in">
-                                <h3 className="font-bold text-slate-800 text-sm mb-1 flex items-center"><IconSettings /> Column Mappings</h3>
+                                <h3 className="font-bold text-slate-800 text-sm mb-1 flex items-center"><IconSettings /> Column Mappings ({selectedMonth} {selectedYear})</h3>
                                 <p className="text-xs text-slate-500 mb-4">Confirm column headers read from row 6.</p>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                                     {[
@@ -1242,7 +1296,6 @@
                                                         <IconCamera /> {isExportingImage ? 'Exporting...' : 'Export HD Image'}
                                                     </button>
 
-                                                    {/* Admin Seating Tools */}
                                                     {isAdmin && (
                                                         <>
                                                             <button 
@@ -1342,7 +1395,7 @@
                                                 <div className="text-center mb-4">
                                                     <h2 className="text-sm md:text-base font-bold text-slate-800 tracking-tight">{activeVenue}</h2>
                                                     <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
-                                                        {activeDay} {venueDates[activeVenue]?.[activeDay] ? `• ${venueDates[activeVenue][activeDay]}` : ''} • Total Attendees: {attendeesList.length}
+                                                        {activeDay} {venueDates[activeVenue]?.[activeDay] ? `• ${venueDates[activeVenue][activeDay]}` : ''} • Total Attendees: {attendeesList.length} • {selectedMonth} {selectedYear}
                                                     </p>
                                                 </div>
 
@@ -1453,12 +1506,12 @@
                         </div>
                     )}
 
-                    {/* Inline Training Dates Modal with Isolated Draft State */}
+                    {/* Training Dates Modal */}
                     {showDatesModal && (
                         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
                             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
                                 <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCalendar /> Set Training Dates</h3>
+                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCalendar /> Set Training Dates ({selectedMonth} {selectedYear})</h3>
                                     <button type="button" onClick={() => setShowDatesModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
                                 </div>
                                 <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar">
@@ -1520,12 +1573,12 @@
                         </div>
                     )}
 
-                    {/* Inline Add Participant Modal */}
+                    {/* Add Participant Modal */}
                     {showAddModal && (
                         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
                             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
                                 <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconUserPlus /> Add Participant</h3>
+                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconUserPlus /> Add Participant ({selectedMonth} {selectedYear})</h3>
                                     <button type="button" onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
                                 </div>
                                 <form onSubmit={e => {
@@ -1602,7 +1655,7 @@
                         </div>
                     )}
 
-                    {/* Inline Attendance Modal */}
+                    {/* Attendance Modal */}
                     {editingSeatPax && (
                         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
                             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -1679,7 +1732,7 @@
                         </div>
                     )}
 
-                    {/* Inline Resigned Confirmation Modal */}
+                    {/* Resigned Confirmation Modal */}
                     {removingPax && (
                         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
                             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden p-5">
@@ -1695,12 +1748,12 @@
                         </div>
                     )}
 
-                    {/* Inline Cloud Workspace Modal */}
+                    {/* Dedicated Cloud Workspace & Room Switcher Modal */}
                     {showCloudModal && (
                         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
                             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
                                 <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCloud /> Live Cloud Sync Workspace</h3>
+                                    <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCloud /> Live Cloud Sync & Workspace Switcher</h3>
                                     <button type="button" onClick={() => setShowCloudModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
                                 </div>
                                 <div className="p-5 space-y-4">
@@ -1712,32 +1765,42 @@
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-700 mb-1">Select Month</label>
-                                            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                                {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-                                            </select>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Switch Active Training Month</label>
+                                        <div className="grid grid-cols-2 gap-3 mb-3">
+                                            <div>
+                                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Month</label>
+                                                <select value={modalMonth} onChange={e => setModalMonth(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                                    {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year</label>
+                                                <select value={modalYear} onChange={e => setModalYear(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                                                    {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                                                </select>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-700 mb-1">Select Year</label>
-                                            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="w-full border rounded-md p-2 text-xs font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                                {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-                                            </select>
-                                        </div>
+                                        <button 
+                                            type="button" 
+                                            onClick={handleSwitchWorkspace} 
+                                            className="w-full py-2 bg-blue-600 text-white rounded-md text-xs font-bold hover:bg-blue-700 shadow-sm"
+                                        >
+                                            Switch to {modalMonth} {modalYear} Workspace
+                                        </button>
                                     </div>
 
                                     <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg text-xs text-blue-900 font-semibold text-center">
-                                        Current Workspace: <strong>{selectedMonth} {selectedYear}</strong>
+                                        Current Active Workspace: <strong>{selectedMonth} {selectedYear}</strong>
                                     </div>
 
-                                    <div className="pt-2">
-                                        <label className="block text-xs font-bold text-slate-700 mb-1">Shareable Team Link</label>
+                                    <div className="pt-2 border-t border-slate-100">
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Share Link for {selectedMonth} {selectedYear}</label>
                                         <div className="flex gap-2">
                                             <input type="text" readOnly value={`${window.location.origin}${window.location.pathname}?month=${selectedMonth}&year=${selectedYear}`} className="w-full border rounded-md px-2 py-1.5 text-xs text-slate-600 bg-slate-50" />
                                             <button type="button" onClick={() => {
                                                 navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?month=${selectedMonth}&year=${selectedYear}`);
-                                                showToast("Shareable link copied to clipboard!");
+                                                showToast(`Share link copied for ${selectedMonth} ${selectedYear}!`);
                                             }} className="px-3 py-1.5 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-md text-xs font-bold whitespace-nowrap">Copy</button>
                                         </div>
                                     </div>
