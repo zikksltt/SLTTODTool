@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Promoter Training Schedule Dashboard</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: '#2563eb', secondary: '#64748b' },
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- React 18 & Babel Standalone -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- SheetJS & Html2Canvas -->
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- Cloud Synchronization Engine Script -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        window.__cloudSyncEngine = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            doc,
+            setDoc,
+            getDoc,
+            onSnapshot,
+            collection
+        };
+        window.dispatchEvent(new CustomEvent('cloud-sync-engine-ready'));
+    </script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #334155; margin: 0; padding: 0; overflow-x: hidden; }
+        .fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .is-manual-list { background-color: #fef08a !important; border-color: #eab308 !important; }
+        .is-manual-seat { background-color: #fef08a !important; border-color: #eab308 !important; }
+        
+        .seat-absent { background-color: #fee2e2 !important; border-color: #ef4444 !important; border-bottom-color: #dc2626 !important; }
+        .seat-absent * { color: #7f1d1d !important; }
+        
+        .seat-late { background-color: #ffedd5 !important; border-color: #f97316 !important; border-bottom-color: #ea580c !important; }
+        .seat-late * { color: #7c2d12 !important; }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div class="min-h-screen flex items-center justify-center bg-slate-50">
+            <div class="text-center p-6 bg-white rounded-xl shadow-sm border border-slate-200">
+                <div class="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                <p class="text-sm font-bold text-slate-700">Loading Promoter Dashboard...</p>
+                <p class="text-xs text-slate-400 mt-1">Initializing data engines and interface</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useRef, useCallback } = React;
+
+        // Visual SVG Icons
+        const IconUpload = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>;
+        const IconUser = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 mr-1.5 flex-shrink-0"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>;
+        const IconAlert = ({className="w-4 h-4 mr-1.5 flex-shrink-0"}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>;
+        const IconSettings = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-slate-500 mr-2 flex-shrink-0"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>;
+        const IconMapPin = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>;
+        const IconGrid = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>;
+        const IconList = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>;
+        const IconShuffle = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>;
+        const IconCamera = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>;
+        const IconSaveFile = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>;
+        const IconUserPlus = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>;
+        const IconClose = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 flex-shrink-0"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
+        const IconEdit = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 flex-shrink-0"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>;
+        const IconTable = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="9" x2="9" y2="21"></line><line x1="15" y1="9" x2="15" y2="21"></line></svg>;
+        const IconSwap = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 mr-1 flex-shrink-0"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"></path></svg>;
+        const IconCalendar = () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-1.5 flex-shrink-0"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>;
+        const IconTrash = ({className="w-3.5 h-3.5 flex-shrink-0"}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>;
+        const IconCloud = ({className="w-4 h-4 mr-1.5 flex-shrink-0"}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>;
+        const IconCloudSync = ({className="w-4 h-4 mr-1.5 flex-shrink-0"}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>;
+        const IconShare = ({className="w-4 h-4 mr-1.5 flex-shrink-0"}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>;
+
+        // Helper: Check if date is the First Wednesday of the Month
+        const isFirstWednesday = (dateStr) => {
+            if (!dateStr) return false;
+            try {
+                const parts = dateStr.split('-');
+                if (parts.length !== 3) return false;
+                const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                if (isNaN(d.getTime())) return false;
+                return d.getDay() === 3 && d.getDate() <= 7;
+            } catch(e) {
+                return false;
+            }
+        };
+
+        // Constants and Venue Configurations
+        const VENUE_CONFIG = {
+            'Online Office Day': { isOneDay: true },
+            'Keisha Kitchenet': { isOneDay: true },
+            "Njoy'S Tourist And Learners' Lounge": { isOneDay: true },
+            'Prime Days Hotel, Naga Camarines Sur': { isOneDay: false },
+            'Zillion Builders, 7-Eleven Sabang, Lipa': { isOneDay: false }
+        };
+
+        // Error Boundary to prevent any blank page issues
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error };
+            }
+            componentDidCatch(error, errorInfo) {
+                console.error("Dashboard caught error:", error, errorInfo);
+            }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+                            <div className="bg-white p-6 rounded-xl shadow-lg border border-red-200 max-w-lg w-full text-center">
+                                <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                                    <IconAlert className="w-6 h-6" />
+                                </div>
+                                <h3 className="text-base font-bold text-slate-800 mb-1">Dashboard Recovered Gracefully</h3>
+                                <p className="text-xs text-slate-500 mb-4">{this.state.error?.message || "An interface state issue occurred."}</p>
+                                <button 
+                                    type="button" 
+                                    onClick={() => { this.setState({ hasError: false }); window.location.reload(); }}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors"
+                                >
+                                    Reload Interface
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        const MainDashboard = () => {
+            const [step, setStep] = useState('upload'); 
+            const [fileName, setFileName] = useState('');
+            const [error, setError] = useState('');
+            
+            const [rawData, setRawData] = useState([]);
+            const [headers, setHeaders] = useState([]);
+            
+            const [mappings, setMappings] = useState({
+                nameCol: 6, supCol: 5, jobCol: 8, locCol: 11, geoCol: 4, regionCol: 9, mallCol: 14,
+                targetGeo: 'SL', 
+                vipVenues: {},
+                venueDates: {
+                    'Online Office Day': { Day1: '' },
+                    'Keisha Kitchenet': { Day1: '' },
+                    "Njoy'S Tourist And Learners' Lounge": { Day1: '' },
+                    'Prime Days Hotel, Naga Camarines Sur': { Day1: '', Day2: '' },
+                    'Zillion Builders, 7-Eleven Sabang, Lipa': { Day1: '', Day2: '' }
+                }
+            });
+
+            const [addedParticipants, setAddedParticipants] = useState([]);
+            const [customSeatings, setCustomSeatings] = useState({});
+            const [attendanceData, setAttendanceData] = useState({}); 
+
+            const [scheduleData, setScheduleData] = useState(null);
+            const [sortedVenues, setSortedVenues] = useState([]);
+            const [activeVenue, setActiveVenue] = useState(null);
+            const [activeDay, setActiveDay] = useState('Day1');
+            const [viewMode, setViewMode] = useState('list'); 
+
+            // Modal States
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [editingSeatPax, setEditingSeatPax] = useState(null); 
+            const [showSwapModal, setShowSwapModal] = useState(false);
+            const [showDateModal, setShowDateModal] = useState(false);
+            const [toastMessage, setToastMessage] = useState(null);
+            const [paxToRemove, setPaxToRemove] = useState(null);
+
+            // Cloud Synchronization States
+            const [syncStatus, setSyncStatus] = useState('connecting'); // 'connecting' | 'synced' | 'saving' | 'offline' | 'error'
+            const [cloudRoomId, setCloudRoomId] = useState(() => {
+                try {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    return urlParams.get('workspace') || 'main-schedule';
+                } catch(e) {
+                    return 'main-schedule';
+                }
+            });
+            const [cloudUserId, setCloudUserId] = useState('');
+            const [showCloudModal, setShowCloudModal] = useState(false);
+            const [lastSyncedTime, setLastSyncedTime] = useState(null);
+            const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+            const isLocalChangeRef = useRef(false);
+            const firestoreDbRef = useRef(null);
+            const firestoreAuthRef = useRef(null);
+            const unsubscribeSnapshotRef = useRef(null);
+
+            const fileInputRef = useRef(null);
+
+            const showToast = (msg) => {
+                setToastMessage(msg);
+                setTimeout(() => setToastMessage(null), 4000);
+            };
+
+            // Cloud Storage Authentication and Synchronization Engine
+            const initCloudStorage = useCallback(async (roomIdToUse = cloudRoomId) => {
+                const engine = window.__cloudSyncEngine;
+                if (!engine) {
+                    setSyncStatus('offline');
+                    return;
+                }
+
+                try {
+                    let firebaseConfig = null;
+                    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                        try {
+                            firebaseConfig = JSON.parse(__firebase_config);
+                        } catch(e) {
+                            console.warn("Could not parse environment config", e);
+                        }
+                    }
+
+                    if (!firebaseConfig) {
+                        setSyncStatus('offline');
+                        return;
+                    }
+
+                    const app = engine.initializeApp(firebaseConfig);
+                    const auth = engine.getAuth(app);
+                    const db = engine.getFirestore(app);
+                    firestoreDbRef.current = db;
+                    firestoreAuthRef.current = auth;
+
+                    // Authentication prior to database queries (Rule 3)
+                    let user = null;
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        try {
+                            const cred = await engine.signInWithCustomToken(auth, __initial_auth_token);
+                            user = cred.user;
+                        } catch (tokErr) {
+                            const cred = await engine.signInAnonymously(auth);
+                            user = cred.user;
+                        }
+                    } else {
+                        const cred = await engine.signInAnonymously(auth);
+                        user = cred.user;
+                    }
+
+                    if (!user) {
+                        setSyncStatus('error');
+                        return;
+                    }
+
+                    setCloudUserId(user.uid);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+                    // Public data collection path (Rule 1)
+                    const docRef = engine.doc(db, 'artifacts', appId, 'public', 'data', 'training_workspaces', roomIdToUse);
+
+                    if (unsubscribeSnapshotRef.current) {
+                        unsubscribeSnapshotRef.current();
+                    }
+
+                    // Real-time synchronization subscription with mandatory error callback
+                    unsubscribeSnapshotRef.current = engine.onSnapshot(docRef, (docSnap) => {
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            if (data && !isLocalChangeRef.current) {
+                                try {
+                                    if (data.rawDataJson) setRawData(JSON.parse(data.rawDataJson));
+                                    if (data.headers) setHeaders(data.headers);
+                                    if (data.mappings) setMappings(data.mappings);
+                                    if (data.addedParticipants) setAddedParticipants(data.addedParticipants);
+                                    if (data.customSeatingsJson) setCustomSeatings(JSON.parse(data.customSeatingsJson));
+                                    if (data.attendanceData) setAttendanceData(data.attendanceData);
+                                    if (data.fileName) setFileName(data.fileName);
+                                    if (data.sortedVenues) setSortedVenues(data.sortedVenues);
+
+                                    if (data.scheduleDataJson) {
+                                        const parsedSched = JSON.parse(data.scheduleDataJson);
+                                        setScheduleData(parsedSched);
+                                        setActiveVenue(prev => prev || (data.sortedVenues && data.sortedVenues[0]) || Object.keys(parsedSched)[0]);
+                                        setStep('dashboard');
+                                    }
+                                    setLastSyncedTime(data.lastUpdated || new Date().toLocaleTimeString());
+                                    setSyncStatus('synced');
+                                } catch (parseErr) {
+                                    console.error("Error reading shared data:", parseErr);
+                                }
+                            }
+                        } else {
+                            setSyncStatus('synced');
+                        }
+                    }, (err) => {
+                        console.error("Cloud listener error:", err);
+                        setSyncStatus('error');
+                    });
+
+                } catch (initErr) {
+                    console.error("Cloud initialization error:", initErr);
+                    setSyncStatus('offline');
+                }
+            }, [cloudRoomId]);
+
+            useEffect(() => {
+                if (window.__cloudSyncEngine) {
+                    initCloudStorage();
+                } else {
+                    const handleReady = () => initCloudStorage();
+                    window.addEventListener('cloud-sync-engine-ready', handleReady);
+                    return () => window.removeEventListener('cloud-sync-engine-ready', handleReady);
+                }
+
+                return () => {
+                    if (unsubscribeSnapshotRef.current) {
+                        unsubscribeSnapshotRef.current();
+                    }
+                };
+            }, [initCloudStorage]);
+
+            // Save to Cloud Storage
+            const pushToCloud = async (customPayload = null) => {
+                const db = firestoreDbRef.current;
+                const auth = firestoreAuthRef.current;
+                const engine = window.__cloudSyncEngine;
+                if (!db || !auth || !engine || !auth.currentUser) {
+                    showToast("Cloud sync offline. Data saved in browser session.");
+                    return;
+                }
+
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const docRef = engine.doc(db, 'artifacts', appId, 'public', 'data', 'training_workspaces', cloudRoomId);
+
+                try {
+                    setSyncStatus('saving');
+                    isLocalChangeRef.current = true;
+
+                    const payload = customPayload || {
+                        rawDataJson: JSON.stringify(rawData || []),
+                        headers: headers || [],
+                        mappings: mappings || {},
+                        addedParticipants: addedParticipants || [],
+                        customSeatingsJson: JSON.stringify(customSeatings || {}),
+                        attendanceData: attendanceData || {},
+                        fileName: fileName || '',
+                        scheduleDataJson: JSON.stringify(scheduleData || {}),
+                        sortedVenues: sortedVenues || [],
+                        lastUpdated: new Date().toLocaleTimeString(),
+                        updatedByUid: auth.currentUser.uid
+                    };
+
+                    await engine.setDoc(docRef, payload);
+                    setLastSyncedTime(new Date().toLocaleTimeString());
+                    setSyncStatus('synced');
+                    showToast("Synced live to cloud!");
+                    setTimeout(() => { isLocalChangeRef.current = false; }, 600);
+                } catch (err) {
+                    console.error("Cloud write failed:", err);
+                    setSyncStatus('error');
+                    isLocalChangeRef.current = false;
+                    showToast("Cloud sync failed. Check connection.");
+                }
+            };
+
+            // Debounced auto-sync when schedule, attendance, or dates change
+            useEffect(() => {
+                if (!autoSyncEnabled || !scheduleData || syncStatus === 'offline' || isLocalChangeRef.current) return;
+
+                const timer = setTimeout(() => {
+                    pushToCloud();
+                }, 1500);
+
+                return () => clearTimeout(timer);
+            }, [attendanceData, customSeatings, scheduleData, mappings.venueDates, autoSyncEnabled]);
+
+            const headerBtnBase = "h-10 px-4 py-2 bg-blue-600 text-sm text-white rounded font-medium flex items-center justify-center hover:bg-blue-700 transition-colors shadow-sm cursor-pointer border-none outline-none whitespace-nowrap";
+
+            const shuffleArray = (array) => {
+                const arr = [...array];
+                let currentIndex = arr.length, randomIndex;
+                while (currentIndex !== 0) {
+                    randomIndex = Math.floor(Math.random() * currentIndex);
+                    currentIndex--;
+                    [arr[currentIndex], arr[randomIndex]] = [arr[randomIndex], arr[currentIndex]];
+                }
+                return arr;
+            };
+
+            const preserveScroll = (callback) => {
+                const scrollY = window.scrollY;
+                callback();
+                setTimeout(() => window.scrollTo(0, scrollY), 0);
+            };
+
+            const getPaxId = (pax) => `${pax.name}|${pax.supervisor}`;
+
+            const getJobPriority = (job) => {
+                const j = (job || '').toUpperCase();
+                if (j.includes('CLUSTER LEAD')) return 1;
+                if (j.includes('MALL LEADER')) return 2;
+                if (j.includes('MERCHANDISER')) return 3;
+                if (j.includes('OPERATOR')) return 4;
+                return 5; // PROMOTER and others
+            };
+
+            const determineVenue = (name, loc, sup, job, region, customConfig = mappings) => {
+                const locUpper = (loc || '').toUpperCase();
+                let supUpper = (sup || '').toUpperCase();
+                supUpper = supUpper.replace('BARCIA, JAYAR', 'BARCIA, JAY AR').replace('BARCIA, JAY-AR', 'BARCIA, JAY AR');
+                const jobUpper = (job || '').toUpperCase();
+                const regUpper = (region || '').toUpperCase();
+
+                // 1. Excluded Roles
+                if (jobUpper.includes('MALL EXCELLENCE LEADER') || jobUpper.includes('REGIONAL EXCELLENCE LEADER')) {
+                    return null;
+                }
+
+                // 2. Individual Tap-to-Assign Venue Override
+                if (customConfig.vipVenues && customConfig.vipVenues[name]) {
+                    return customConfig.vipVenues[name];
+                }
+
+                // 3. Cluster Lead default
+                if (jobUpper.includes('CLUSTER LEAD')) {
+                    return 'Zillion Builders, 7-Eleven Sabang, Lipa';
+                }
+
+                // 4. Supervisor Priority Overrides
+                if (supUpper.includes('MALALUAN, JAYSON') || supUpper.includes('MALALUAN')) {
+                    return "Njoy'S Tourist And Learners' Lounge";
+                }
+                if (supUpper.includes('FRESNILLO, JOHN JOHN') || supUpper.includes('FRESNILLO')) {
+                    return "Njoy'S Tourist And Learners' Lounge";
+                }
+                if (supUpper.includes('MARCIAL, KENNEDY')) {
+                    return 'Keisha Kitchenet';
+                }
+                
+                const primeDaysSups = [
+                    'BUENA, ANTONETTE', 'BARCIA, JAY AR', 'BAÑADERA, JAYPEE', 
+                    'BORBE, KING JUNO', 'LORILLA, SONNY', 'MADRONA, SELWYN'
+                ];
+                if (primeDaysSups.some(s => supUpper.includes(s))) {
+                    return 'Prime Days Hotel, Naga Camarines Sur';
+                }
+
+                // 5. Location Online Day Overrides
+                if (locUpper.includes('MASBATE') || locUpper.includes('VIRAC')) {
+                    return 'Online Office Day';
+                }
+
+                // 6. Column J Region Tagging
+                if (regUpper.includes('BICOL ISLAND')) return 'Online Office Day';
+                if (regUpper.includes('BICOL')) return 'Prime Days Hotel, Naga Camarines Sur';
+                if (regUpper.includes('CALABARZON')) return 'Zillion Builders, 7-Eleven Sabang, Lipa';
+                if (regUpper.includes('MINDORO')) return 'Keisha Kitchenet';
+                if (regUpper.includes('PALAWAN')) return "Njoy'S Tourist And Learners' Lounge";
+
+                return 'Zillion Builders, 7-Eleven Sabang, Lipa';
+            };
+
+            const handleSaveWorkspace = () => {
+                const workspaceData = { 
+                    rawData, headers, mappings, addedParticipants, customSeatings, 
+                    fileName, attendanceData, scheduleData, sortedVenues 
+                };
+                const blob = new Blob([JSON.stringify(workspaceData)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `Promoter_Workspace_${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+            };
+
+            const handleLoadWorkspace = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const saved = JSON.parse(evt.target.result);
+                        setRawData(saved.rawData || []);
+                        setHeaders(saved.headers || []);
+                        setMappings(saved.mappings || mappings);
+                        setAddedParticipants(saved.addedParticipants || []);
+                        setCustomSeatings(saved.customSeatings || {});
+                        setAttendanceData(saved.attendanceData || {});
+                        setFileName(saved.fileName || file.name);
+                        
+                        if (saved.scheduleData) {
+                            setScheduleData(saved.scheduleData);
+                            setSortedVenues(saved.sortedVenues || Object.keys(saved.scheduleData));
+                            setActiveVenue(saved.sortedVenues ? saved.sortedVenues[0] : Object.keys(saved.scheduleData)[0]);
+                            setActiveDay('Day1');
+                            setStep('dashboard');
+                        } else {
+                            processSchedule(false, saved); 
+                        }
+                        showToast("Workspace loaded successfully!");
+                    } catch (err) {
+                        setError("Failed to load workspace. Invalid format.");
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            const handleExportExcel = () => {
+                if (!scheduleData) return;
+                
+                const exportData = [];
+                Object.keys(scheduleData).forEach(venue => {
+                    const venueDates = mappings.venueDates?.[venue] || {};
+                    ['Day1', 'Day2'].forEach(day => {
+                        if (scheduleData[venue][day]) {
+                            const dateAssigned = venueDates[day] || 'Not Set';
+                            scheduleData[venue][day].forEach(p => {
+                                const paxId = getPaxId(p);
+                                const att = attendanceData[paxId] || { status: 'Present', violation: false, remarks: '' };
+                                
+                                exportData.push({
+                                    'Name': p.name,
+                                    'Supervisor': p.supervisor,
+                                    'Job Position': p.job,
+                                    'Mall (Column O)': p.mall || '',
+                                    'Region Tag (Column J)': p.region || '',
+                                    'Location': p.location,
+                                    'Geo Area': p.geo,
+                                    'Assigned Venue': venue,
+                                    'Assigned Day': day,
+                                    'Training Date': dateAssigned,
+                                    'Status': att.status,
+                                    'One Look Violation': att.violation ? 'Yes' : 'No',
+                                    'Remarks': att.remarks || '',
+                                    'Manually Added': p.isManual ? 'Yes' : 'No'
+                                });
+                            });
+                        }
+                    });
+                });
+
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Training Schedule");
+                XLSX.writeFile(wb, `Promoter_Schedule_${new Date().toISOString().split('T')[0]}.xlsx`);
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setFileName(file.name);
+                setError('');
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const wb = XLSX.read(evt.target.result, { type: 'binary' });
+                        const ws = wb.Sheets[wb.SheetNames[0]];
+                        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+                        
+                        const headerRowIndex = 5; // Row 6
+                        if (data.length <= headerRowIndex) {
+                            setError("File too short. Headers must be on row 6."); return;
+                        }
+                        const extractedHeaders = data[headerRowIndex].map((h, i) => ({
+                            index: i, label: h ? `${XLSX.utils.encode_col(i)} - ${h}` : `${XLSX.utils.encode_col(i)} - (Empty)`
+                        }));
+                        setHeaders(extractedHeaders);
+                        setRawData(data.slice(headerRowIndex + 1)); 
+                        setAddedParticipants([]); 
+                        setCustomSeatings({});
+                        setAttendanceData({});
+                        setStep('mapping');
+                    } catch (err) { 
+                        setError("Failed to parse Excel file. Ensure valid format."); 
+                    }
+                };
+                reader.readAsBinaryString(file);
+            };
+
+            const processSchedule = (isShuffle = false, overrideState = null, customMappings = null) => {
+                const activeMappings = customMappings || (overrideState ? overrideState.mappings : mappings);
+                const activeRaw = overrideState ? overrideState.rawData : rawData;
+                
+                const { nameCol, supCol, jobCol, locCol, geoCol, regionCol, mallCol, targetGeo, venueDates } = activeMappings;
+                
+                const result = {};
+                Object.keys(VENUE_CONFIG).forEach(v => {
+                    result[v] = { isOneDay: VENUE_CONFIG[v].isOneDay, Day1: [], Day2: [] };
+                });
+
+                const seenNames = new Set();
+                const validParticipants = [];
+                
+                activeRaw.forEach(row => {
+                    let supervisorName = (row[supCol] || "").toString().trim().toUpperCase();
+                    supervisorName = supervisorName.replace("BARCIA, JAYAR", "BARCIA, JAY AR").replace("BARCIA, JAY-AR", "BARCIA, JAY AR");
+                    
+                    const name = (row[nameCol] || "").toString().trim();
+                    const job = (row[jobCol] || "").toString().trim().toUpperCase();
+                    const geo = (row[geoCol] || "").toString().trim().toUpperCase();
+                    const region = (row[regionCol] || "").toString().trim().toUpperCase();
+                    const mall = (row[mallCol] || "").toString().trim().toUpperCase();
+                    
+                    if (!name || seenNames.has(name)) return; 
+                    
+                    if (job.includes('MALL EXCELLENCE LEADER') || job.includes('REGIONAL EXCELLENCE LEADER')) return;
+
+                    const isPromoter = job.includes('PROMOTER') || job.includes('PROMO');
+                    const isSpecialJob = job.includes('CLUSTER LEAD') || job.includes('MALL LEADER') || job.includes('MERCHANDISER') || job.includes('OPERATOR');
+                    if (!isPromoter && !isSpecialJob) return;
+
+                    if (targetGeo && geo !== targetGeo.toUpperCase()) return;
+                    
+                    seenNames.add(name);
+                    
+                    validParticipants.push({
+                        name: name,
+                        supervisor: supervisorName,
+                        job: job,
+                        location: (row[locCol] || "").toString().trim().toUpperCase(),
+                        geo: geo,
+                        region: region,
+                        mall: mall,
+                        isManual: false
+                    });
+                });
+
+                let twoDayPools = { 'Prime Days Hotel, Naga Camarines Sur': [], 'Zillion Builders, 7-Eleven Sabang, Lipa': [] };
+
+                validParticipants.forEach(p => {
+                    const venue = determineVenue(p.name, p.location, p.supervisor, p.job, p.region, activeMappings);
+                    if (!venue) return; 
+                    if (VENUE_CONFIG[venue].isOneDay) {
+                        result[venue].Day1.push(p);
+                    } else {
+                        twoDayPools[venue].push(p);
+                    }
+                });
+
+                // Supervisor 50/50 Division with Mall Coverage and Operator Promoter 1st Wednesday Logic
+                Object.keys(twoDayPools).forEach(venue => {
+                    let pool = twoDayPools[venue];
+                    const vDates = venueDates?.[venue] || {};
+                    const d1IsWed = isFirstWednesday(vDates.Day1);
+                    const d2IsWed = isFirstWednesday(vDates.Day2);
+
+                    let supGroups = {};
+                    pool.forEach(p => {
+                        if (!supGroups[p.supervisor]) supGroups[p.supervisor] = [];
+                        supGroups[p.supervisor].push(p);
+                    });
+
+                    let sortedSups = Object.keys(supGroups).sort();
+                    sortedSups.forEach(sup => {
+                        let team = [...supGroups[sup]];
+                        
+                        // Separate Operator Promoters if 1st Wednesday applies
+                        let forcedD1 = [];
+                        let forcedD2 = [];
+                        let standardTeam = [];
+
+                        team.forEach(p => {
+                            const isOp = p.job.includes('OPERATOR');
+                            if (isOp && d1IsWed && !d2IsWed) {
+                                forcedD2.push(p);
+                            } else if (isOp && d2IsWed && !d1IsWed) {
+                                forcedD1.push(p);
+                            } else {
+                                standardTeam.push(p);
+                            }
+                        });
+
+                        if (!isShuffle) {
+                            standardTeam.sort((a,b) => {
+                                const pA = getJobPriority(a.job);
+                                const pB = getJobPriority(b.job);
+                                if (pA !== pB) return pA - pB;
+                                const mallCmp = (a.mall || '').localeCompare(b.mall || '');
+                                if (mallCmp !== 0) return mallCmp;
+                                return (a.name || '').localeCompare(b.name || '');
+                            });
+                        } else {
+                            standardTeam = shuffleArray(standardTeam);
+                        }
+
+                        let d1 = [...forcedD1];
+                        let d2 = [...forcedD2];
+
+                        // Mall-balanced round-robin distribution
+                        standardTeam.forEach((p) => {
+                            if (d1.length <= d2.length) {
+                                d1.push(p);
+                            } else {
+                                d2.push(p);
+                            }
+                        });
+
+                        result[venue].Day1.push(...d1);
+                        result[venue].Day2.push(...d2);
+                    });
+                });
+
+                // Add Manual Participants without breaking existing order
+                addedParticipants.forEach(p => {
+                    const venue = determineVenue(p.name, p.location, p.supervisor, p.job, p.region, activeMappings);
+                    if (!venue) return;
+                    if (VENUE_CONFIG[venue].isOneDay) {
+                        result[venue].Day1.push(p);
+                    } else {
+                        const targetDay = p.preferredDay || (result[venue].Day1.length <= result[venue].Day2.length ? 'Day1' : 'Day2');
+                        result[venue][targetDay].push(p);
+                    }
+                });
+
+                const oneDayVenues = ['Online Office Day', 'Keisha Kitchenet', "Njoy'S Tourist And Learners' Lounge"];
+                oneDayVenues.forEach(v => {
+                    if (isShuffle) result[v].Day1 = shuffleArray(result[v].Day1);
+                    else result[v].Day1 = result[v].Day1.sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+                });
+
+                // Front-of-the-room priority sorting for VIP positions
+                Object.keys(result).forEach(v => {
+                    ['Day1', 'Day2'].forEach(d => {
+                        result[v][d].sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+                    });
+                });
+
+                const venueTotalsArray = Object.keys(result).map(v => ({
+                    name: v, total: result[v].Day1.length + result[v].Day2.length
+                })).sort((a, b) => b.total - a.total);
+                
+                const sortedNames = venueTotalsArray.map(item => item.name);
+                
+                preserveScroll(() => {
+                    setSortedVenues(sortedNames);
+                    setScheduleData(result);
+                    
+                    if (isShuffle && !overrideState) setCustomSeatings({});
+
+                    if (!overrideState && step !== 'dashboard') {
+                        setActiveVenue(sortedNames[0]);
+                        setActiveDay('Day1');
+                        setStep('dashboard');
+                    }
+                });
+            };
+
+            // Move or Swap Participants between Day 1 and Day 2 of the same venue
+            const handleMoveOrSwap = (personToMove, destinationDay, personToSwapWith = null) => {
+                const venue = activeVenue;
+                if (!venue || !scheduleData[venue] || VENUE_CONFIG[venue].isOneDay) return;
+
+                const vDates = mappings.venueDates?.[venue] || {};
+                const destDate = vDates[destinationDay];
+                
+                // Operator Promoter check
+                if (personToMove.job.includes('OPERATOR') && isFirstWednesday(destDate)) {
+                    showToast("Operator Promoters cannot be scheduled on the 1st Wednesday of the month!");
+                    return;
+                }
+
+                if (personToSwapWith && personToSwapWith.job.includes('OPERATOR')) {
+                    const originDay = destinationDay === 'Day1' ? 'Day2' : 'Day1';
+                    if (isFirstWednesday(vDates[originDay])) {
+                        showToast("Cannot swap: Operator Promoter would land on the 1st Wednesday of the month!");
+                        return;
+                    }
+                }
+
+                setScheduleData(prev => {
+                    const next = { ...prev };
+                    const vData = { ...next[venue] };
+                    const sourceDay = destinationDay === 'Day1' ? 'Day2' : 'Day1';
+
+                    let newSource = vData[sourceDay].filter(p => getPaxId(p) !== getPaxId(personToMove));
+                    let newDest = [...vData[destinationDay]];
+
+                    if (personToSwapWith) {
+                        newDest = newDest.filter(p => getPaxId(p) !== getPaxId(personToSwapWith));
+                        newSource.push(personToSwapWith);
+                    }
+
+                    newDest.push(personToMove);
+
+                    // Re-sort VIPs to the front
+                    newSource.sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+                    newDest.sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+
+                    vData[sourceDay] = newSource;
+                    vData[destinationDay] = newDest;
+                    next[venue] = vData;
+                    return next;
+                });
+
+                showToast(`Moved ${personToMove.name} to ${destinationDay}!`);
+            };
+
+            // Remove Resigned Field Force Member and cleanly empty their seat
+            const handleRemovePax = (pax) => {
+                if (!pax) return;
+                const paxId = getPaxId(pax);
+
+                // 1. Remove from active scheduleData
+                setScheduleData(prev => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach(v => {
+                        ['Day1', 'Day2'].forEach(d => {
+                            if (next[v][d]) {
+                                next[v][d] = next[v][d].filter(item => getPaxId(item) !== paxId);
+                            }
+                        });
+                    });
+                    return next;
+                });
+
+                // 2. Cleanly vacant their seat in customSeatings so nobody else moves
+                setCustomSeatings(prev => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach(key => {
+                        if (next[key]?.grid) {
+                            const newGrid = next[key].grid.map(s => (s && getPaxId(s) === paxId ? null : s));
+                            next[key] = { ...next[key], grid: newGrid };
+                        }
+                    });
+                    return next;
+                });
+
+                // 3. Remove from addedParticipants list
+                setAddedParticipants(prev => prev.filter(item => getPaxId(item) !== paxId));
+
+                // 4. Remove attendance record
+                setAttendanceData(prev => {
+                    const next = { ...prev };
+                    delete next[paxId];
+                    return next;
+                });
+
+                setPaxToRemove(null);
+                setEditingSeatPax(null);
+                showToast(`Removed ${pax.name} (Resigned) from schedule.`);
+            };
+
+            const AddParticipantModal = () => {
+                const [name, setName] = useState('');
+                const [sup, setSup] = useState('');
+                const [locOverride, setLocOverride] = useState('');
+                const [mall, setMall] = useState('');
+                const [jobInput, setJobInput] = useState('PROMOTER');
+                const [preferredDay, setPreferredDay] = useState('auto');
+
+                const uniqueSups = useMemo(() => {
+                    const sups = new Set();
+                    const target = (mappings.targetGeo || '').toUpperCase();
+                    
+                    rawData.forEach(row => {
+                        const geo = (row[mappings.geoCol] || "").toString().trim().toUpperCase();
+                        if (target && geo !== target) return; 
+
+                        let s = (row[mappings.supCol] || "").toString().trim().toUpperCase();
+                        if (s) {
+                            s = s.replace("BARCIA, JAYAR", "BARCIA, JAY AR").replace("BARCIA, JAY-AR", "BARCIA, JAY AR");
+                            sups.add(s);
+                        }
+                    });
+                    addedParticipants.forEach(p => {
+                        if (p.geo.toUpperCase() === target) sups.add(p.supervisor);
+                    });
+                    return Array.from(sups).sort();
+                }, [rawData, addedParticipants, mappings]);
+
+                const handleAdd = (e) => {
+                    e.preventDefault();
+                    if (!name || !sup) return;
+                    
+                    const loc = locOverride.trim() || 'ADDED MANUALLY';
+                    const venue = determineVenue(name.trim(), loc, sup, jobInput, '', mappings);
+                    if (!venue) return;
+
+                    let targetDay = 'Day1';
+                    if (!VENUE_CONFIG[venue].isOneDay) {
+                        if (preferredDay === 'Day1' || preferredDay === 'Day2') {
+                            targetDay = preferredDay;
+                        } else {
+                            targetDay = scheduleData[venue].Day1.length <= scheduleData[venue].Day2.length ? 'Day1' : 'Day2';
+                        }
+                    }
+
+                    // Check Operator Promoter first wednesday
+                    const vDates = mappings.venueDates?.[venue] || {};
+                    if (jobInput.includes('OPERATOR') && isFirstWednesday(vDates[targetDay])) {
+                        showToast(`Operator Promoters cannot be scheduled on ${targetDay} (1st Wednesday)!`);
+                        return;
+                    }
+
+                    const newPerson = {
+                        name: name.trim(),
+                        supervisor: sup,
+                        job: jobInput,
+                        geo: mappings.targetGeo || 'SL',
+                        location: loc,
+                        mall: mall.trim().toUpperCase(),
+                        preferredDay: targetDay,
+                        isManual: true
+                    };
+
+                    setScheduleData(prev => {
+                        const next = { ...prev };
+                        const vData = { ...next[venue] };
+                        vData[targetDay] = [...vData[targetDay], newPerson];
+                        vData[targetDay].sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+                        next[venue] = vData;
+                        return next;
+                    });
+
+                    // Insert into seating without shifting others
+                    const seatKey = `${venue}_${targetDay}`;
+                    setCustomSeatings(prevSeats => {
+                        const nextSeats = { ...prevSeats };
+                        if (nextSeats[seatKey]) {
+                            const grid = [...nextSeats[seatKey].grid];
+                            const emptyIdx = grid.indexOf(null);
+                            if (emptyIdx !== -1) {
+                                grid[emptyIdx] = newPerson;
+                                nextSeats[seatKey] = { ...nextSeats[seatKey], grid };
+                            } else {
+                                const cols = nextSeats[seatKey].cols;
+                                const rows = nextSeats[seatKey].rows + 1;
+                                const newGrid = [...grid, ...Array(cols).fill(null)];
+                                newGrid[grid.length] = newPerson;
+                                nextSeats[seatKey] = { grid: newGrid, rows, cols };
+                            }
+                        }
+                        return nextSeats;
+                    });
+
+                    setAddedParticipants(prev => [...prev, newPerson]);
+                    setShowAddModal(false);
+                    showToast(`Added ${newPerson.name} to ${venue} (${targetDay})!`);
+                };
+
+                if (!showAddModal) return null;
+
+                return (
+                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+                            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconUserPlus /> Add Participant</h3>
+                                <button type="button" onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors"><IconClose /></button>
+                            </div>
+                            <form onSubmit={handleAdd} className="p-5 space-y-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Employee Name *</label>
+                                    <input type="text" required value={name} onChange={e=>setName(e.target.value)} className="w-full border border-slate-300 rounded px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none" placeholder="e.g. DELA CRUZ, JUAN" autoFocus />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Job Position *</label>
+                                    <select required value={jobInput} onChange={e=>setJobInput(e.target.value)} className="w-full border border-slate-300 rounded px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none bg-white">
+                                        <option value="PROMOTER">PROMOTER</option>
+                                        <option value="OPERATOR PROMOTER">OPERATOR PROMOTER</option>
+                                        <option value="MERCHANDISER">MERCHANDISER</option>
+                                        <option value="MALL LEADER">MALL LEADER</option>
+                                        <option value="CLUSTER LEAD">CLUSTER LEAD</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Supervisor ({mappings.targetGeo} Only) *</label>
+                                    <select required value={sup} onChange={e=>setSup(e.target.value)} className="w-full border border-slate-300 rounded px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none bg-white">
+                                        <option value="" disabled>Select a Supervisor...</option>
+                                        {uniqueSups.map(s => <option key={s} value={s}>{s}</option>)}
+                                    </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Mall (Column O)</label>
+                                        <input type="text" value={mall} onChange={e=>setMall(e.target.value)} className="w-full border border-slate-300 rounded px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500" placeholder="e.g. SM LIPA" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Preferred Day</label>
+                                        <select value={preferredDay} onChange={e=>setPreferredDay(e.target.value)} className="w-full border border-slate-300 rounded px-3 py-1.5 text-xs outline-none bg-white">
+                                            <option value="auto">Auto-Balance</option>
+                                            <option value="Day1">Day 1</option>
+                                            <option value="Day2">Day 2</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Store / Location</label>
+                                    <input type="text" value={locOverride} onChange={e=>setLocOverride(e.target.value)} className="w-full border border-slate-300 rounded px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500" placeholder="e.g. VIRAC or MASBATE for Online" />
+                                </div>
+                                <div className="pt-2 flex justify-end gap-2">
+                                    <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+                                    <button type="submit" className="px-4 py-1.5 rounded text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm">Add & Assign</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                );
+            };
+
+            const AttendanceModal = () => {
+                if (!editingSeatPax) return null;
+                const paxId = getPaxId(editingSeatPax);
+                const currentData = attendanceData[paxId] || { status: 'Present', violation: false, remarks: '' };
+                
+                const [status, setStatus] = useState(currentData.status);
+                const [violation, setViolation] = useState(currentData.violation);
+                const [remarks, setRemarks] = useState(currentData.remarks);
+
+                const handleSave = () => {
+                    setAttendanceData(prev => ({ ...prev, [paxId]: { status, violation, remarks } }));
+                    setEditingSeatPax(null);
+                    showToast("Attendance updated!");
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+                            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                <h3 className="font-bold text-slate-800 text-sm">Attendance & Remarks</h3>
+                                <button type="button" onClick={() => setEditingSeatPax(null)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                            </div>
+                            <div className="p-5 space-y-4">
+                                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex flex-col items-center">
+                                    <span className="text-xs font-bold text-slate-800">{editingSeatPax.name}</span>
+                                    <span className="text-[10px] text-slate-500 font-medium">{editingSeatPax.supervisor} • {editingSeatPax.job}</span>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Status</label>
+                                    <div className="flex gap-2">
+                                        {['Present', 'Late', 'Absent'].map(s => (
+                                            <button key={s} type="button" onClick={() => setStatus(s)}
+                                                className={`flex-1 py-1.5 text-xs font-bold rounded border transition-all ${status === s ? (s==='Present'?'bg-emerald-100 border-emerald-500 text-emerald-800' : s==='Late'?'bg-orange-100 border-orange-500 text-orange-800':'bg-red-100 border-red-500 text-red-800') : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                                {s}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 pt-1">
+                                    <input type="checkbox" id="violCheck" checked={violation} onChange={e=>setViolation(e.target.checked)} className="w-4 h-4 text-blue-600 rounded border-slate-300 cursor-pointer" />
+                                    <label htmlFor="violCheck" className="text-xs font-bold text-slate-700 cursor-pointer select-none">Mark One Look Violation ⚠️</label>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Remarks & Notes</label>
+                                    <textarea value={remarks} onChange={e=>setRemarks(e.target.value)} className="w-full border border-slate-300 rounded p-2 text-xs focus:ring-1 focus:ring-blue-500 outline-none min-h-[60px]" placeholder="Add remarks..."></textarea>
+                                </div>
+                                <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
+                                    <button 
+                                        type="button" 
+                                        onClick={() => {
+                                            setPaxToRemove(editingSeatPax);
+                                            setEditingSeatPax(null);
+                                        }} 
+                                        className="px-3 py-1.5 rounded text-xs font-bold text-red-600 hover:bg-red-50 transition-colors flex items-center"
+                                    >
+                                        <IconTrash className="w-3.5 h-3.5 mr-1" /> Remove (Resigned)
+                                    </button>
+                                    <button type="button" onClick={handleSave} className="px-4 py-1.5 rounded text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-sm">Save</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // In-app Resigned Staff Confirmation Modal (No browser alerts)
+            const RemoveConfirmModal = () => {
+                if (!paxToRemove) return null;
+                return (
+                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+                            <div className="px-5 py-4 border-b border-red-100 bg-red-50/50 flex justify-between items-center">
+                                <h3 className="font-bold text-red-800 text-sm flex items-center"><IconAlert className="text-red-600 w-4 h-4 mr-1.5" /> Confirm Resignation</h3>
+                                <button type="button" onClick={() => setPaxToRemove(null)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                            </div>
+                            <div className="p-5 space-y-3">
+                                <p className="text-xs text-slate-600">
+                                    Are you sure you want to remove <strong>{paxToRemove.name}</strong> from the training schedule?
+                                </p>
+                                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-[11px] text-slate-500 space-y-1">
+                                    <div><strong>Supervisor:</strong> {paxToRemove.supervisor}</div>
+                                    <div><strong>Role:</strong> {paxToRemove.job}</div>
+                                    {paxToRemove.mall && <div><strong>Mall:</strong> {paxToRemove.mall}</div>}
+                                </div>
+                                <p className="text-[10px] text-slate-400">
+                                    *Their seat will become vacant in the seating chart without moving other attendees.
+                                </p>
+                                <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                                    <button type="button" onClick={() => setPaxToRemove(null)} className="px-3 py-1.5 rounded text-xs font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                                    <button type="button" onClick={() => handleRemovePax(paxToRemove)} className="px-4 py-1.5 rounded text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-sm">Yes, Remove</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const RescheduleSwapModal = () => {
+                if (!showSwapModal || !activeVenue || VENUE_CONFIG[activeVenue].isOneDay) return null;
+                const d1Attendees = scheduleData[activeVenue]?.Day1 || [];
+                const d2Attendees = scheduleData[activeVenue]?.Day2 || [];
+
+                const [selectedD1, setSelectedD1] = useState(null);
+                const [selectedD2, setSelectedD2] = useState(null);
+                const [searchFilter, setSearchFilter] = useState('');
+
+                const filterFn = (p) => {
+                    if (!searchFilter.trim()) return true;
+                    const q = searchFilter.toLowerCase();
+                    return p.name.toLowerCase().includes(q) || p.supervisor.toLowerCase().includes(q) || (p.mall && p.mall.toLowerCase().includes(q));
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[85vh]">
+                            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                <div>
+                                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                                        <IconSwap /> Reschedule & Swap Days — {activeVenue}
+                                    </h3>
+                                    <p className="text-[10px] text-slate-400">Move an attendee or select one on each day to swap their schedules.</p>
+                                </div>
+                                <button type="button" onClick={() => setShowSwapModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                            </div>
+                            
+                            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-4">
+                                <input 
+                                    type="text" 
+                                    placeholder="Search by name, supervisor, or mall..." 
+                                    value={searchFilter} 
+                                    onChange={e=>setSearchFilter(e.target.value)} 
+                                    className="w-full max-w-sm border border-slate-300 rounded px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                                />
+                                {selectedD1 && selectedD2 && (
+                                    <button 
+                                        type="button" 
+                                        onClick={() => {
+                                            handleMoveOrSwap(selectedD1, 'Day2', selectedD2);
+                                            setSelectedD1(null);
+                                            setSelectedD2(null);
+                                        }}
+                                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold flex items-center gap-1 shadow-sm flex-shrink-0"
+                                    >
+                                        <IconSwap /> Swap {selectedD1.name.split(',')[0]} ⇄ {selectedD2.name.split(',')[0]}
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 p-4 overflow-y-auto custom-scrollbar flex-grow">
+                                {/* Day 1 Column */}
+                                <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50 flex flex-col">
+                                    <div className="flex justify-between items-center pb-2 border-b border-slate-200 mb-2">
+                                        <h4 className="text-xs font-bold text-slate-700">Day 1 ({d1Attendees.length} Pax)</h4>
+                                        <span className="text-[10px] text-slate-400 font-semibold">{mappings.venueDates?.[activeVenue]?.Day1 || 'Date unset'}</span>
+                                    </div>
+                                    <div className="space-y-1.5 overflow-y-auto custom-scrollbar flex-grow">
+                                        {d1Attendees.filter(filterFn).map(p => {
+                                            const isSelected = selectedD1 && getPaxId(selectedD1) === getPaxId(p);
+                                            return (
+                                                <div key={getPaxId(p)} onClick={() => setSelectedD1(isSelected ? null : p)}
+                                                    className={`p-2 rounded border text-xs cursor-pointer transition-all flex items-center justify-between ${isSelected ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                                                    <div className="truncate mr-2">
+                                                        <span className="font-bold text-slate-800 block truncate">{p.name}</span>
+                                                        <span className="text-[10px] text-slate-400 truncate block">{p.supervisor} • {p.mall || p.job}</span>
+                                                    </div>
+                                                    <button type="button" onClick={(e) => { e.stopPropagation(); handleMoveOrSwap(p, 'Day2'); }}
+                                                        className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 hover:bg-blue-600 hover:text-white rounded border border-slate-200 text-slate-600 transition-colors flex-shrink-0">
+                                                        Move D2 ➡️
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Day 2 Column */}
+                                <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50 flex flex-col">
+                                    <div className="flex justify-between items-center pb-2 border-b border-slate-200 mb-2">
+                                        <h4 className="text-xs font-bold text-slate-700">Day 2 ({d2Attendees.length} Pax)</h4>
+                                        <span className="text-[10px] text-slate-400 font-semibold">{mappings.venueDates?.[activeVenue]?.Day2 || 'Date unset'}</span>
+                                    </div>
+                                    <div className="space-y-1.5 overflow-y-auto custom-scrollbar flex-grow">
+                                        {d2Attendees.filter(filterFn).map(p => {
+                                            const isSelected = selectedD2 && getPaxId(selectedD2) === getPaxId(p);
+                                            return (
+                                                <div key={getPaxId(p)} onClick={() => setSelectedD2(isSelected ? null : p)}
+                                                    className={`p-2 rounded border text-xs cursor-pointer transition-all flex items-center justify-between ${isSelected ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                                                    <button type="button" onClick={(e) => { e.stopPropagation(); handleMoveOrSwap(p, 'Day1'); }}
+                                                        className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 hover:bg-blue-600 hover:text-white rounded border border-slate-200 text-slate-600 transition-colors flex-shrink-0 mr-2">
+                                                        ⬅️ Move D1
+                                                    </button>
+                                                    <div className="truncate text-right">
+                                                        <span className="font-bold text-slate-800 block truncate">{p.name}</span>
+                                                        <span className="text-[10px] text-slate-400 truncate block">{p.supervisor} • {p.mall || p.job}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // Venue Date Setup Modal (for modifying dates inside dashboard)
+            const VenueDateSetupModal = () => {
+                if (!showDateModal) return null;
+                const [datesState, setDatesState] = useState(mappings.venueDates || {});
+
+                const handleSaveDates = () => {
+                    setMappings(prev => ({ ...prev, venueDates: datesState }));
+                    setShowDateModal(false);
+                    showToast("Training dates updated!");
+                };
+
+                return (
+                    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+                            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                <h3 className="font-bold text-slate-800 flex items-center text-sm"><IconCalendar /> Set Venue Training Dates</h3>
+                                <button type="button" onClick={() => setShowDateModal(false)} className="text-slate-400 hover:text-slate-600"><IconClose /></button>
+                            </div>
+                            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                                <p className="text-[11px] text-slate-500">
+                                    Dates falling on the <strong>1st Wednesday of the month</strong> will be flagged to prevent Operator Promoters from scheduling conflicts.
+                                </p>
+                                {Object.keys(VENUE_CONFIG).map(v => {
+                                    const isOneDay = VENUE_CONFIG[v].isOneDay;
+                                    const curDates = datesState[v] || {};
+                                    return (
+                                        <div key={v} className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+                                            <span className="text-xs font-bold text-slate-800 block">{v}</span>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div>
+                                                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Day 1 Date</label>
+                                                    <input 
+                                                        type="date" 
+                                                        value={curDates.Day1 || ''} 
+                                                        onChange={e => setDatesState({ ...datesState, [v]: { ...curDates, Day1: e.target.value } })}
+                                                        className="w-full border border-slate-300 rounded px-2 py-1 text-xs bg-white outline-none"
+                                                    />
+                                                    {isFirstWednesday(curDates.Day1) && <span className="text-[9px] text-amber-700 font-bold block mt-0.5">⚠️ 1st Wednesday</span>}
+                                                </div>
+                                                {!isOneDay && (
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Day 2 Date</label>
+                                                        <input 
+                                                            type="date" 
+                                                            value={curDates.Day2 || ''} 
+                                                            onChange={e => setDatesState({ ...datesState, [v]: { ...curDates, Day2: e.target.value } })}
+                                                            className="w-full border border-slate-300 rounded px-2 py-1 text-xs bg-white outline-none"
+                                                        />
+                                                        {isFirstWednesday(curDates.Day2) && <span className="text-[9px] text-amber-700 font-bold block mt-0.5">⚠️ 1st Wednesday</span>}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                <div className="pt-2 flex justify-end gap-2">
+                                    <button type="button" onClick={() => setShowDateModal(false)} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+                                    <button type="button" onClick={handleSaveDates} className="px-4 py-1.5 rounded text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm">Save Dates</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const MappingView = () => {
+                const [localVipVenues, setLocalVipVenues] = useState(mappings.vipVenues || {});
+                const [localDates, setLocalDates] = useState(mappings.venueDates || {});
+
+                const detectedVips = useMemo(() => {
+                    if (!rawData.length) return [];
+                    const vips = new Map();
+                    rawData.forEach(row => {
+                        const name = (row[mappings.nameCol] || "").toString().trim();
+                        const job = (row[mappings.jobCol] || "").toString().trim().toUpperCase();
+                        const geo = (row[mappings.geoCol] || "").toString().trim().toUpperCase();
+                        
+                        if (!name) return;
+                        if (job.includes('MALL EXCELLENCE LEADER') || job.includes('REGIONAL EXCELLENCE LEADER')) return;
+                        
+                        const isSpecialJob = job.includes('LEADER') || job.includes('MERCHANDISER') || job.includes('CLUSTER');
+                        if (isSpecialJob) {
+                            if (!mappings.targetGeo || geo === mappings.targetGeo.toUpperCase()) {
+                                vips.set(name, job);
+                            }
+                        }
+                    });
+                    return Array.from(vips.entries()).map(([name, job]) => ({ name, job })).sort((a,b) => a.name.localeCompare(b.name));
+                }, [rawData, mappings.nameCol, mappings.jobCol, mappings.geoCol, mappings.targetGeo]);
+
+                const handleBadgeClick = (e, vipName, venue) => {
+                    e.preventDefault();
+                    setLocalVipVenues(prev => ({ ...prev, [vipName]: venue }));
+                };
+
+                const handleProcessClick = () => {
+                    const newMappings = { ...mappings, vipVenues: localVipVenues, venueDates: localDates };
+                    setMappings(newMappings);
+                    processSchedule(false, null, newMappings);
+                };
+
+                return (
+                    <div className="w-full px-2 mx-auto mt-4 fade-in mb-12">
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden max-w-5xl mx-auto">
+                            <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                                <div className="flex items-center">
+                                    <IconSettings />
+                                    <div>
+                                        <h2 className="text-base font-bold text-slate-800">Map Columns & Training Dates</h2>
+                                        <p className="text-xs text-slate-500">Headers read from Row 6 of <strong>{fileName}</strong></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-4 space-y-4">
+                                <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 flex flex-wrap gap-4 items-center">
+                                    <h3 className="text-xs font-bold text-blue-800 uppercase flex items-center"><IconAlert className="w-3 h-3 mr-1" /> Filters & Tagging</h3>
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-xs font-semibold text-slate-700">Geo Filter:</label>
+                                        <input type="text" value={mappings.targetGeo} onChange={e => setMappings({...mappings, targetGeo: e.target.value})} className="w-20 border border-slate-300 rounded px-2 py-1 text-xs focus:ring-1 bg-white outline-none" />
+                                    </div>
+                                    <span className="text-[10px] text-blue-600 font-medium">*MALL EXCELLENCE & REGIONAL EXCELLENCE Leaders are automatically excluded.</span>
+                                </div>
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    {[
+                                        { key: 'nameCol', label: 'Name (Col G)' },
+                                        { key: 'supCol', label: 'Supervisor (Col F)' },
+                                        { key: 'jobCol', label: 'Job Role (Col I)' },
+                                        { key: 'regionCol', label: 'Region Tag (Col J)' },
+                                        { key: 'mallCol', label: 'Mall (Col O)' },
+                                        { key: 'locCol', label: 'Location (Col L)' },
+                                        { key: 'geoCol', label: 'Geo Area (Col E)' }
+                                    ].map(({key, label}) => (
+                                        <div key={key}>
+                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">{label}</label>
+                                            <select value={mappings[key]} onChange={e => setMappings({...mappings, [key]: Number(e.target.value)})} className="w-full border border-slate-300 rounded p-1.5 text-xs bg-slate-50 outline-none">
+                                                {headers.map(h => <option key={h.index} value={h.index}>{h.label}</option>)}
+                                            </select>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Step 2: Training Dates Configuration */}
+                                <div className="pt-3 border-t border-slate-100">
+                                    <h4 className="text-xs font-bold text-slate-700 mb-1 flex items-center"><IconCalendar /> Set Training Dates for Each Venue</h4>
+                                    <p className="text-[11px] text-slate-500 mb-2.5">Operator Promoters are strictly restricted from the 1st Wednesday of the month.</p>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                                        {Object.keys(VENUE_CONFIG).map(v => {
+                                            const isOneDay = VENUE_CONFIG[v].isOneDay;
+                                            const curDates = localDates[v] || {};
+                                            return (
+                                                <div key={v} className="bg-slate-50 p-2.5 rounded border border-slate-200 text-xs">
+                                                    <span className="font-bold text-slate-700 truncate block mb-1.5" title={v}>{v}</span>
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center justify-between gap-1">
+                                                            <span className="text-[10px] text-slate-500 font-semibold">Day 1:</span>
+                                                            <input 
+                                                                type="date" 
+                                                                value={curDates.Day1 || ''} 
+                                                                onChange={e => setLocalDates({ ...localDates, [v]: { ...curDates, Day1: e.target.value } })}
+                                                                className="border border-slate-300 rounded px-1.5 py-0.5 text-[11px] bg-white outline-none w-32"
+                                                            />
+                                                        </div>
+                                                        {!isOneDay && (
+                                                            <div className="flex items-center justify-between gap-1">
+                                                                <span className="text-[10px] text-slate-500 font-semibold">Day 2:</span>
+                                                                <input 
+                                                                    type="date" 
+                                                                    value={curDates.Day2 || ''} 
+                                                                    onChange={e => setLocalDates({ ...localDates, [v]: { ...curDates, Day2: e.target.value } })}
+                                                                    className="border border-slate-300 rounded px-1.5 py-0.5 text-[11px] bg-white outline-none w-32"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Step 3: Tap-to-Assign Leadership Staff */}
+                                {detectedVips.length > 0 && (
+                                    <div className="pt-3 border-t border-slate-100">
+                                        <h4 className="text-xs font-bold text-slate-700 mb-1">Tap-to-Assign Leadership & Support Staff</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-2 bg-slate-50 rounded border border-slate-200 custom-scrollbar">
+                                            {detectedVips.map(vip => {
+                                                const currentAssigned = localVipVenues[vip.name] || mappings.vipVenues?.[vip.name] || determineVenue(vip.name, '', '', vip.job, '', mappings);
+                                                return (
+                                                    <div key={vip.name} className="flex flex-col bg-white p-2.5 rounded border border-slate-200 shadow-2xs gap-1.5">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-xs font-bold text-slate-800 truncate" title={vip.name}>{vip.name}</span>
+                                                            <span className="text-[9px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">{vip.job}</span>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {Object.keys(VENUE_CONFIG).map(v => {
+                                                                const isSelected = currentAssigned === v;
+                                                                return (
+                                                                    <button key={v} type="button" onClick={(e) => handleBadgeClick(e, vip.name, v)} className={`px-2 py-0.5 text-[9.5px] font-bold rounded transition-all border ${isSelected ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+                                                                        {v.replace(', Naga Camarines Sur', '').replace('Zillion Builders, ', '').replace('Njoy\'S Tourist And Learners\' Lounge', 'NJoy')}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="pt-3 border-t border-slate-100 flex justify-end">
+                                    <button type="button" onClick={handleProcessClick} className="px-6 py-2 rounded text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors">
+                                        Generate Balanced Schedule
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const DashboardView = () => {
+                if (!activeVenue || !scheduleData[activeVenue]) return null;
+                const currentVenueData = scheduleData[activeVenue];
+                const attendees = currentVenueData[activeDay] || [];
+                const seatKey = `${activeVenue}_${activeDay}`;
+
+                useEffect(() => {
+                    if (currentVenueData.isOneDay && activeDay === 'Day2') setActiveDay('Day1');
+                }, [activeVenue, currentVenueData]);
+
+                const { displayGrid, displayRows, displayCols } = useMemo(() => {
+                    let layout = customSeatings[seatKey];
+                    if (!layout) {
+                        const defaultCols = 5;
+                        const defaultRows = Math.max(1, Math.ceil(attendees.length / defaultCols));
+                        const newGrid = Array(defaultRows * defaultCols).fill(null);
+                        const sortedAttendees = [...attendees].sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job));
+                        sortedAttendees.forEach((a, i) => newGrid[i] = a);
+                        return { displayGrid: newGrid, displayRows: defaultRows, displayCols: defaultCols };
+                    }
+                    
+                    let { grid, rows, cols } = layout;
+                    const gridIdentifiers = grid.filter(Boolean).map(getPaxId);
+                    const missing = attendees.filter(a => !gridIdentifiers.includes(getPaxId(a)));
+                    
+                    if (missing.length === 0) return { displayGrid: grid, displayRows: rows, displayCols: cols };
+
+                    let nextGrid = [...grid];
+                    let nextRows = rows;
+                    
+                    const sortedMissing = missing.sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job));
+                    sortedMissing.forEach(p => {
+                        let emptyIdx = nextGrid.indexOf(null);
+                        if (emptyIdx === -1) {
+                            nextRows++;
+                            nextGrid = nextGrid.concat(Array(cols).fill(null));
+                            emptyIdx = nextGrid.indexOf(null);
+                        }
+                        nextGrid[emptyIdx] = p;
+                    });
+                    return { displayGrid: nextGrid, displayRows: nextRows, displayCols: cols };
+                }, [customSeatings, seatKey, attendees]);
+
+                const [selectedSeat, setSelectedSeat] = useState(null);
+
+                const updateLayout = (newGrid, newRows, newCols) => {
+                    setCustomSeatings(prev => ({ ...prev, [seatKey]: { grid: newGrid, rows: newRows, cols: newCols } }));
+                };
+
+                const groupedBySup = useMemo(() => {
+                    const groups = {};
+                    attendees.forEach(p => {
+                        if (!groups[p.supervisor]) groups[p.supervisor] = [];
+                        groups[p.supervisor].push(p);
+                    });
+                    return groups;
+                }, [attendees]);
+
+                const handleRowColChange = (type, val) => {
+                    const num = Number(val) || 1;
+                    let newRows = type === 'rows' ? num : displayRows;
+                    let newCols = type === 'cols' ? num : displayCols;
+                    
+                    let newGrid = Array(newRows * newCols).fill(null);
+                    displayGrid.forEach((p, i) => { if (p && i < newGrid.length) newGrid[i] = p; });
+                    
+                    const lost = displayGrid.slice(newGrid.length).filter(p => p !== null);
+                    lost.forEach(p => {
+                        const emptyIdx = newGrid.indexOf(null);
+                        if (emptyIdx !== -1) newGrid[emptyIdx] = p;
+                    });
+                    updateLayout(newGrid, newRows, newCols);
+                    setSelectedSeat(null);
+                };
+
+                const handleSeatClick = (index) => {
+                    if (selectedSeat === null) {
+                        if (displayGrid[index]) setSelectedSeat(index); 
+                    } else {
+                        if (selectedSeat === index) {
+                            setSelectedSeat(null);
+                        } else {
+                            const nextGrid = [...displayGrid];
+                            const temp = nextGrid[index];
+                            nextGrid[index] = nextGrid[selectedSeat];
+                            nextGrid[selectedSeat] = temp;
+                            updateLayout(nextGrid, displayRows, displayCols);
+                            setSelectedSeat(null); 
+                        }
+                    }
+                };
+
+                const activeDateStr = mappings.venueDates?.[activeVenue]?.[activeDay] || 'Date unset';
+
+                return (
+                    <div className="w-full px-2 mx-auto mt-4 space-y-4 pb-12 fade-in">
+                        {/* Venue Navigation Bar */}
+                        <div className="bg-white p-1.5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-1.5">
+                            {sortedVenues.map(v => {
+                                const isActive = activeVenue === v;
+                                const totalCount = scheduleData[v].Day1.length + scheduleData[v].Day2.length;
+                                return (
+                                    <button key={v} type="button" onClick={() => { setActiveVenue(v); setSelectedSeat(null); }}
+                                        className={`flex-1 flex-col text-left p-2 rounded-lg transition-all min-w-[150px] ${isActive ? 'bg-blue-50 border-blue-200 border shadow-sm' : 'border border-transparent text-slate-600 hover:bg-slate-50'}`}>
+                                        <div className="flex justify-between items-center">
+                                            <IconMapPin />
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${isActive ? 'bg-blue-200 text-blue-800' : 'bg-slate-200 text-slate-600'}`}>{totalCount} Total</span>
+                                        </div>
+                                        <span className={`mt-1 text-[11px] font-semibold truncate block w-full ${isActive ? 'text-blue-900' : ''}`} title={v}>{v}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Schedule Header & Sub-toolbar */}
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex flex-wrap justify-between items-center gap-3">
+                                <div className="flex items-center gap-2">
+                                    <div className="flex space-x-1.5 bg-slate-200/60 p-1 rounded-md">
+                                        <button type="button" onClick={() => {setActiveDay('Day1'); setSelectedSeat(null);}} className={`px-4 py-1.5 rounded text-xs font-semibold ${activeDay === 'Day1' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                            Day 1 ({currentVenueData.Day1.length})
+                                        </button>
+                                        {!currentVenueData.isOneDay && (
+                                            <button type="button" onClick={() => {setActiveDay('Day2'); setSelectedSeat(null);}} className={`px-4 py-1.5 rounded text-xs font-semibold ${activeDay === 'Day2' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                                Day 2 ({currentVenueData.Day2.length})
+                                            </button>
+                                        )}
+                                    </div>
+                                    <span className="text-[11px] text-slate-500 font-bold bg-white px-2 py-1 rounded border border-slate-200 flex items-center">
+                                        <IconCalendar /> {activeDateStr}
+                                    </span>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 ml-auto">
+                                    {!currentVenueData.isOneDay && (
+                                        <button type="button" onClick={() => setShowSwapModal(true)} className="h-8 px-3 py-1 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded border border-slate-300 shadow-2xs flex items-center">
+                                            <IconSwap /> Reschedule / Swap
+                                        </button>
+                                    )}
+                                    <button type="button" onClick={() => setShowDateModal(true)} className="h-8 px-3 py-1 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded border border-slate-300 shadow-2xs flex items-center">
+                                        <IconCalendar /> Set Dates
+                                    </button>
+                                    <div className="flex bg-slate-200/60 p-1 rounded-md">
+                                        <button type="button" onClick={() => {setViewMode('list'); setSelectedSeat(null);}} className={`flex items-center px-3 py-1 rounded text-[11px] font-bold ${viewMode === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><IconList /> List</button>
+                                        <button type="button" onClick={() => setViewMode('seating')} className={`flex items-center px-3 py-1 rounded text-[11px] font-bold ${viewMode === 'seating' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><IconGrid /> Seating</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* View Content */}
+                            <div className="p-4 bg-white min-h-[300px]">
+                                {attendees.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-48 text-slate-400"><IconAlert /><p className="mt-2 text-xs font-medium">No assigned personnel.</p></div>
+                                ) : viewMode === 'list' ? (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+                                        {Object.keys(groupedBySup).sort().map(sup => {
+                                            const sortedList = [...groupedBySup[sup]].sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+                                            return (
+                                                <div key={sup} className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex flex-col h-full">
+                                                    <h4 className="text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-1.5 mb-2 truncate" title={sup}>{sup}</h4>
+                                                    <ul className="space-y-1.5 flex-grow">
+                                                        {sortedList.map((p, i) => {
+                                                            const paxId = getPaxId(p);
+                                                            const att = attendanceData[paxId] || { status: 'Present', violation: false, remarks: '' };
+                                                            return (
+                                                                <li key={p.name + i} className={`flex flex-col text-[11px] font-semibold text-slate-700 p-2 rounded shadow-2xs border ${p.isManual ? 'is-manual-list' : 'bg-white border-slate-200'}`}>
+                                                                    <div className="flex items-center justify-between gap-1">
+                                                                        <div className="flex items-center truncate">
+                                                                            <IconUser /> 
+                                                                            <span className="truncate">{p.name}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1 flex-shrink-0">
+                                                                            <button type="button" onClick={() => setEditingSeatPax(p)} className="text-slate-400 hover:text-blue-600 p-0.5">
+                                                                                <IconEdit />
+                                                                            </button>
+                                                                            <button type="button" onClick={() => setPaxToRemove(p)} className="text-slate-400 hover:text-red-600 p-0.5">
+                                                                                <IconTrash className="w-3 h-3" />
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between text-[9px] text-slate-400 mt-1">
+                                                                        <span>{p.mall || p.location}</span>
+                                                                        <div className="flex items-center gap-1">
+                                                                            {p.job.includes('OPERATOR') && <span className="bg-purple-100 text-purple-700 font-bold px-1 rounded">OP.PROMO</span>}
+                                                                            {p.job.includes('CLUSTER LEAD') && <span className="bg-blue-100 text-blue-700 font-bold px-1 rounded">C.LEAD</span>}
+                                                                            {p.job.includes('MALL LEADER') && <span className="bg-blue-100 text-blue-700 font-bold px-1 rounded">M.LEAD</span>}
+                                                                            {p.job.includes('MERCHANDISER') && <span className="bg-blue-100 text-blue-700 font-bold px-1 rounded">MERCH</span>}
+                                                                            {att.status !== 'Present' && (
+                                                                                <span className={`px-1 rounded font-bold ${att.status==='Late'?'bg-orange-100 text-orange-700':'bg-red-100 text-red-700'}`}>{att.status}</span>
+                                                                            )}
+                                                                            {att.violation && <span>⚠️</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                </li>
+                                                            );
+                                                        })}
+                                                    </ul>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center">
+                                        <div className="w-full mb-4 flex flex-wrap justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200 gap-4">
+                                            <div className="flex items-center gap-4">
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-[11px] font-bold text-slate-600">Rows</label>
+                                                    <input type="number" min="1" max="50" value={displayRows} onChange={e => handleRowColChange('rows', e.target.value)} className="w-16 border rounded p-1 text-xs text-center font-semibold outline-none focus:border-blue-400" />
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-[11px] font-bold text-slate-600">Cols</label>
+                                                    <input type="number" min="1" max="50" value={displayCols} onChange={e => handleRowColChange('cols', e.target.value)} className="w-16 border rounded p-1 text-xs text-center font-semibold outline-none focus:border-blue-400" />
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button type="button" onClick={() => {
+                                                    preserveScroll(() => {
+                                                        const activePeople = displayGrid.filter(a => a !== null);
+                                                        // Keep Non-Promoters in the front seats!
+                                                        const vips = activePeople.filter(p => getJobPriority(p.job) < 5);
+                                                        const promoters = activePeople.filter(p => getJobPriority(p.job) >= 5);
+                                                        
+                                                        vips.sort((a,b) => getJobPriority(a.job) - getJobPriority(b.job) || a.name.localeCompare(b.name));
+                                                        const shuffledPromoters = shuffleArray(promoters);
+                                                        
+                                                        const combined = [...vips, ...shuffledPromoters];
+                                                        const newGrid = Array(displayRows * displayCols).fill(null);
+                                                        combined.forEach((a, i) => {
+                                                            if (i < newGrid.length) newGrid[i] = a;
+                                                        });
+                                                        updateLayout(newGrid, displayRows, displayCols);
+                                                        setSelectedSeat(null);
+                                                    });
+                                                }} className="px-3 py-1.5 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm hover:bg-indigo-100 flex items-center">
+                                                    <IconShuffle /> Shuffle Layout
+                                                </button>
+                                                
+                                                <button type="button" onClick={() => {
+                                                    setSelectedSeat(null);
+                                                    setTimeout(async () => {
+                                                        const el = document.getElementById('seating-capture-area');
+                                                        if (el) {
+                                                            const canvas = await window.html2canvas(el, { scale: 2, backgroundColor: '#f8fafc' });
+                                                            const link = document.createElement('a');
+                                                            link.download = `Seating_${activeVenue}_${activeDay}.png`;
+                                                            link.href = canvas.toDataURL();
+                                                            link.click();
+                                                        }
+                                                    }, 100);
+                                                }} className="px-3 py-1.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-sm hover:bg-emerald-100 flex items-center">
+                                                    <IconCamera /> Save Image
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Seating Grid Canvas */}
+                                        <div className="w-full overflow-auto custom-scrollbar p-4 bg-slate-100/50 rounded-xl border border-slate-200">
+                                            <div id="seating-capture-area" className="p-4 bg-slate-100/50 w-fit mx-auto rounded-lg relative">
+                                                <div className="text-center mb-5">
+                                                    <h3 className="text-sm font-bold text-slate-700">{activeVenue}</h3>
+                                                    <p className="text-[10px] text-slate-500 font-medium uppercase tracking-widest">{activeDay} Seating • {activeDateStr}</p>
+                                                </div>
+                                                <div className="grid gap-2.5 mx-auto" style={{ gridTemplateColumns: `repeat(${displayCols}, minmax(115px, 1fr))`, gridTemplateRows: `repeat(${displayRows}, minmax(80px, 1fr))` }}>
+                                                    {displayGrid.map((attendee, i) => {
+                                                        const isSelected = selectedSeat === i;
+                                                        let attData = null;
+                                                        let boxClasses = "relative flex flex-col items-center justify-center p-2 rounded-lg text-center transition-all cursor-pointer select-none border group min-h-[70px] ";
+                                                        
+                                                        if (attendee) {
+                                                            attData = attendanceData[getPaxId(attendee)] || { status: 'Present', violation: false };
+                                                            
+                                                            if (isSelected) boxClasses += "bg-amber-50 border-amber-400 border-b-4 ring-2 ring-amber-400 shadow-md transform -translate-y-0.5";
+                                                            else if (attData.status === 'Absent') boxClasses += "seat-absent border-b-4 shadow-sm";
+                                                            else if (attData.status === 'Late') boxClasses += "seat-late border-b-4 shadow-sm";
+                                                            else if (attendee.isManual) boxClasses += "is-manual-seat border-b-4 shadow-sm";
+                                                            else boxClasses += "bg-white border-slate-200 border-b-4 border-b-blue-500 shadow-sm";
+                                                        } else {
+                                                            if (selectedSeat !== null) boxClasses += "bg-emerald-50/50 border-2 border-dashed border-emerald-300";
+                                                            else boxClasses += "bg-slate-200/40 border-2 border-dashed border-slate-300";
+                                                        }
+
+                                                        return (
+                                                            <div key={`seat-${i}`} onClick={() => handleSeatClick(i)} className={boxClasses}>
+                                                                {attendee ? (
+                                                                    <>
+                                                                        <div className="absolute top-1 right-1 flex gap-1 z-20">
+                                                                            {attData.violation && <span className="text-[10px]" title="One Look Violation">⚠️</span>}
+                                                                            <button type="button" onClick={(e) => { e.stopPropagation(); setEditingSeatPax(attendee); }} className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-blue-600 bg-white/80 rounded shadow-sm p-1 transition-opacity">
+                                                                                <IconEdit />
+                                                                            </button>
+                                                                        </div>
+                                                                        
+                                                                        {attendee.job.includes('OPERATOR') ? (
+                                                                            <span className="absolute top-1 left-1 text-[7px] font-bold text-purple-700 bg-purple-100 px-1 py-0.5 rounded shadow-2xs tracking-tighter truncate max-w-[50px] z-20">OP.PROMO</span>
+                                                                        ) : attendee.job !== 'PROMOTER' && !attendee.job.includes('PROMO') ? (
+                                                                            <span className="absolute top-1 left-1 text-[7px] font-bold text-blue-700 bg-blue-100 px-1 py-0.5 rounded shadow-2xs tracking-tighter truncate max-w-[50px] z-20">
+                                                                                {attendee.job.replace('CLUSTER LEAD', 'C.LEAD').replace('MALL LEADER', 'M.LEAD').replace('MERCHANDISER', 'MERCH')}
+                                                                            </span>
+                                                                        ) : null}
+                                                                        
+                                                                        <span className="text-[9px] font-bold mb-0.5 opacity-60 mt-1">Seat {i+1}</span>
+                                                                        <span className="text-[11px] font-bold leading-tight z-10 px-1">{attendee.name}</span>
+                                                                        <span className="text-[8px] mt-0.5 truncate w-full z-10 px-1 opacity-70" title={attendee.supervisor}>{attendee.mall || attendee.supervisor}</span>
+                                                                        
+                                                                        {attData.remarks && (
+                                                                            <span className="absolute bottom-1 w-[90%] text-[7px] bg-slate-100 text-slate-500 truncate px-1 rounded mx-auto left-0 right-0 border border-slate-200" title={attData.remarks}>{attData.remarks}</span>
+                                                                        )}
+                                                                    </>
+                                                                ) : (
+                                                                    <span className={`text-[10px] font-bold ${selectedSeat !== null ? 'text-emerald-500' : 'text-slate-400'}`}>
+                                                                        {selectedSeat !== null ? 'Swap/Move' : 'Empty'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    {/* Floating Toast Notification */}
+                    {toastMessage && (
+                        <div className="fixed bottom-5 right-5 z-50 bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-xl fade-in flex items-center gap-2">
+                            <span>{toastMessage}</span>
+                        </div>
+                    )}
+
+                    <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-20">
+                        <div className="w-full px-2 md:px-4 h-[60px] flex items-center justify-between">
+                            <h1 className="text-sm font-bold text-slate-800 tracking-tight hidden sm:block mr-4 flex-shrink-0">Promoter Dashboard</h1>
+                            
+                            <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar h-full py-2 w-full sm:w-auto">
+                                {/* Online Cloud Sync Status Badge */}
+                                <button 
+                                    type="button" 
+                                    onClick={() => setShowCloudModal(true)}
+                                    title="Click to view shared workspace details or switch rooms"
+                                    className={`h-10 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center border transition-all shadow-xs cursor-pointer ${
+                                        syncStatus === 'synced' ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100' :
+                                        syncStatus === 'saving' ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' :
+                                        syncStatus === 'connecting' ? 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100' :
+                                        'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                                    }`}
+                                >
+                                    <IconCloud className="w-3.5 h-3.5 mr-1.5" />
+                                    <span className="hidden md:inline mr-1">
+                                        {syncStatus === 'synced' ? 'Cloud Synced' : syncStatus === 'saving' ? 'Saving...' : syncStatus === 'connecting' ? 'Connecting...' : 'Cloud Setup'}
+                                    </span>
+                                    <span className={`w-2 h-2 rounded-full ${syncStatus === 'synced' ? 'bg-emerald-500' : syncStatus === 'saving' ? 'bg-amber-500 animate-spin' : syncStatus === 'connecting' ? 'bg-blue-500' : 'bg-slate-400'}`}></span>
+                                </button>
+
+                                {step === 'dashboard' && (
+                                    <>
+                                        {viewMode === 'list' && (
+                                            <button type="button" onClick={() => processSchedule(true)} className={headerBtnBase}>
+                                                <IconShuffle /> Shuffle Schedule
+                                            </button>
+                                        )}
+                                        <button type="button" onClick={() => setShowAddModal(true)} className={headerBtnBase}>
+                                            <IconUserPlus /> Add Pax
+                                        </button>
+                                        <div className="w-px h-6 bg-slate-200 mx-1 flex-shrink-0"></div>
+                                        <button type="button" onClick={handleExportExcel} className={headerBtnBase}>
+                                            <IconTable /> Export Excel
+                                        </button>
+                                        <button type="button" onClick={handleSaveWorkspace} className={headerBtnBase}>
+                                            <IconSaveFile /> Save Workspace
+                                        </button>
+                                    </>
+                                )}
+                                
+                                <label className={headerBtnBase + " cursor-pointer m-0"}>
+                                    <IconUpload /> Load Workspace
+                                    <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls, .json" onChange={(e) => {
+                                        if (e.target.files[0].name.endsWith('.json')) handleLoadWorkspace(e);
+                                        else handleFileUpload(e);
+                                        e.target.value = null; 
+                                    }} />
+                                </label>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="w-full flex-grow">
+                        {step === 'upload' && (
+                            <div className="max-w-md mx-auto mt-20 fade-in px-4">
+                                <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 text-center">
+                                    <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                                        <IconUpload />
+                                    </div>
+                                    <h2 className="text-lg font-bold text-slate-800 mb-1">Upload Field Force Excel</h2>
+                                    <p className="text-slate-500 mb-6 text-xs">Target file: <strong>FF Sched OD October.xlsx</strong></p>
+                                    <button type="button" onClick={() => fileInputRef.current.click()} className="w-full border-2 border-dashed border-blue-300 hover:border-blue-500 rounded-lg px-4 py-8 bg-blue-50/40 transition-colors cursor-pointer block">
+                                        <span className="text-blue-600 font-bold text-sm">Click to choose Excel or Workspace file</span>
+                                    </button>
+                                    {error && <div className="mt-4 text-red-600 text-xs font-bold bg-red-50 p-2 rounded flex items-center justify-center"><IconAlert /> {error}</div>}
+                                </div>
+                            </div>
+                        )}
+
+                        {step === 'mapping' && <MappingView />}
+                        {step === 'dashboard' && scheduleData && <DashboardView />}
+                    </main>
+                    
+                    <AddParticipantModal />
+                    <RescheduleSwapModal />
+                    <VenueDateSetupModal />
+                    <AttendanceModal />
+                    <RemoveConfirmModal />
+
+                    {/* Cloud Synchronization and Room Sharing Modal */}
+                    {showCloudModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 fade-in backdrop-blur-sm">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+                                <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                                        <IconCloud className="text-blue-600 w-4 h-4" /> Live Online Sync & Collaboration
+                                    </h3>
+                                    <button type="button" onClick={() => setShowCloudModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                                        <IconClose />
+                                    </button>
+                                </div>
+                                <div className="p-5 space-y-4">
+                                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="text-slate-500 font-medium">Sync Status:</span>
+                                            <span className="font-bold flex items-center gap-1.5">
+                                                {syncStatus === 'synced' && <><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span> <span className="text-emerald-700">Online (Connected)</span></>}
+                                                {syncStatus === 'saving' && <><span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-spin"></span> <span className="text-amber-700">Syncing Changes...</span></>}
+                                                {syncStatus === 'connecting' && <><span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping"></span> <span className="text-blue-700">Connecting...</span></>}
+                                                {syncStatus === 'offline' && <><span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span> <span className="text-slate-600">Local Only (Offline)</span></>}
+                                                {syncStatus === 'error' && <><span className="w-2.5 h-2.5 rounded-full bg-red-500"></span> <span className="text-red-700">Connection Error</span></>}
+                                            </span>
+                                        </div>
+                                        {lastSyncedTime && (
+                                            <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                                <span>Last Synced:</span>
+                                                <span className="font-semibold text-slate-700">{lastSyncedTime}</span>
+                                            </div>
+                                        )}
+                                        {cloudUserId && (
+                                            <div className="flex flex-col text-[10px] text-slate-500 pt-1 border-t border-slate-200">
+                                                <span className="font-medium">User Device ID:</span>
+                                                <span className="font-mono text-slate-600 truncate">{cloudUserId}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1">Shared Workspace Room ID</label>
+                                        <div className="flex gap-2">
+                                            <input 
+                                                type="text" 
+                                                value={cloudRoomId} 
+                                                onChange={e => setCloudRoomId(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                                                className="flex-grow border border-slate-300 rounded px-2.5 py-1.5 text-xs font-mono bg-white outline-none focus:ring-1 focus:ring-blue-500" 
+                                                placeholder="e.g. south-luzon-training"
+                                            />
+                                            <button 
+                                                type="button" 
+                                                onClick={() => {
+                                                    initCloudStorage(cloudRoomId);
+                                                    showToast(`Connected to room: ${cloudRoomId}`);
+                                                }}
+                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold transition-colors shadow-xs"
+                                            >
+                                                Switch
+                                            </button>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 mt-1">Colleagues using this same Room ID will see and edit the exact same live schedule.</p>
+                                    </div>
+
+                                    <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                                        <div>
+                                            <span className="text-xs font-bold text-slate-700 block">Automatic Cloud Sync</span>
+                                            <span className="text-[10px] text-slate-500">Syncs seating, attendance, and swaps in real time</span>
+                                        </div>
+                                        <input 
+                                            type="checkbox" 
+                                            checked={autoSyncEnabled} 
+                                            onChange={e => setAutoSyncEnabled(e.target.checked)} 
+                                            className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                                        />
+                                    </div>
+
+                                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                                        <button 
+                                            type="button" 
+                                            onClick={() => {
+                                                const shareUrl = `${window.location.origin}${window.location.pathname}?workspace=${cloudRoomId}`;
+                                                const dummy = document.createElement('input');
+                                                document.body.appendChild(dummy);
+                                                dummy.value = shareUrl;
+                                                dummy.select();
+                                                document.execCommand('copy');
+                                                document.body.removeChild(dummy);
+                                                showToast("Shareable link copied to clipboard!");
+                                            }}
+                                            className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 transition-colors flex items-center gap-1.5"
+                                        >
+                                            <IconShare /> Copy Link
+                                        </button>
+
+                                        <button 
+                                            type="button" 
+                                            onClick={() => {
+                                                pushToCloud();
+                                                setShowCloudModal(false);
+                                            }}
+                                            className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                                        >
+                                            <IconCloudSync /> Sync Now
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Render application wrapped in Error Boundary
+        const App = () => (
+            <ErrorBoundary>
+                <MainDashboard />
+            </ErrorBoundary>
+        );
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
